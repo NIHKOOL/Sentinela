@@ -6,6 +6,7 @@ Sentinela is a SOC training simulator: a virtual organization, simulated attacke
 - Attack scenarios must stay high-level and simulated: they only generate fake log events inside the app.
 - Render event data in the browser with `textContent` (the `S.el` helper), never `innerHTML`.
 - SOC-facing API responses must not expose ground truth (event `origin`, attack links).
+- Detection rules live in `rules/*.yml` (Sigma-style; engine in `sentinela/rules.py`, format guide in `rules/README.md`). Load YAML with `yaml.safe_load` only. Changing a shipped rule's behaviour needs `tests/test_detection.py` updated too.
 
 ## Session history
 

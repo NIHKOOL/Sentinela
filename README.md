@@ -135,6 +135,7 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 ```
 
 * Every event uses one normalized schema (`TelemetryEvent`), whether it is background noise, an attack step or a real event sent to `/api/v1/ingest`.
+* **Detection rules are YAML files** in the [`rules/`](rules/) folder, written in a [Sigma](https://sigmahq.io)-style format. Add or edit a rule, click **Reload rules** on the Overview page, and it is active, with no code changes and no restart.
 * **Correlation rules** remember earlier events: 5 failed logons from one source within 60 seconds is a brute force (SEN-003), and a successful logon from that source afterwards is critical (SEN-004).
 * Repeated matches of the same rule for the same host, user and source are **grouped** into one alert, like a real SIEM.
 * The simulation remembers which events came from the attacker (**ground truth**), but the SOC views never show it. The score compares your verdicts with the truth.
@@ -153,6 +154,8 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 | SEN-006 | Medium | New user account created | [T1136](https://attack.mitre.org/techniques/T1136/) |
 | SEN-007 | High | 50 MB+ upload to an external IP | [T1048](https://attack.mitre.org/techniques/T1048/) |
 
+Each rule is a file in [`rules/`](rules/). See **[rules/README.md](rules/README.md)** for how to write your own: fields, modifiers, conditions, correlation rules, and an exercise to catch lateral movement.
+
 ---
 
 ## Tech Stack & Dependencies
@@ -160,6 +163,7 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 * **Language:** Python 3.10+
 * **Backend API:** [FastAPI](https://fastapi.tiangolo.com/), served by [Uvicorn](https://www.uvicorn.org/)
 * **Data Modeling:** [Pydantic v2](https://docs.pydantic.dev/) (validation and normalization)
+* **Detection rules:** Sigma-style YAML, read with [PyYAML](https://pyyaml.org/) (`safe_load` only)
 * **Frontend:** plain HTML, CSS and JavaScript (no build step)
 * **Alerting:** Discord incoming webhooks (optional)
 * **Tests:** pytest
@@ -176,9 +180,11 @@ Sentinela/
 │   ├── organization.py        # Virtual company (saved to data/organization.json)
 │   ├── activity.py            # Normal background activity and false-positive sources
 │   ├── attacks.py             # Attacker playbook: simulated attack steps
-│   ├── detection.py           # Detection rules (single-event + correlation)
+│   ├── rules.py               # Loads and validates the YAML rules (Sigma-style engine)
+│   ├── detection.py           # Runs the rules on events, keeps correlation state
 │   ├── simulation.py          # Event pipeline, alert grouping, triage, scoring
 │   └── alerting.py            # Discord notifications
+├── rules/                     # Detection rules, one YAML file each (+ README.md guide)
 ├── web/                       # Pages: Overview, Organization, SOC, Attacker
 │   └── static/                # Shared CSS, JavaScript and logo (logo.png + resized copies)
 ├── tests/                     # pytest suite
@@ -195,7 +201,7 @@ Sentinela/
 - [x] Virtual organization, background activity and attacker scenarios
 - [x] SOC console with alert grouping, triage and scoring
 - [x] Correlation rules (brute force, logon after brute force)
-- [ ] Rules in YAML files, editable without changing code
+- [x] Rules in Sigma-style YAML files, editable and reloadable without changing code
 - [ ] A rule that catches lateral movement
 - [ ] Save events and alerts in SQLite so a game survives restarts
 - [ ] Real Windows agent that sends Event Log data to `/api/v1/ingest`

@@ -21,7 +21,7 @@ Entry template:
 
 ---
 
-## 2026-10-06 — Logo, Discord setup notes
+## 2026-10-06 — Logo, Discord, README install guide, YAML (Sigma-style) rules
 
 **Done**
 - Added the project logo (`web/static/logo.png`, moved from `Logo.png` in the repo root): app icon in the top-left header of every page, browser favicon (`<link rel="icon">` + a `/favicon.ico` route so browsers stop logging 404s), and in front of the README title. Resized copies (`logo-32.png`, `logo-64.png`, `logo-180.png`, made with Windows System.Drawing) are used for favicon, header and README; `logo.png` is kept as the full-size source. Tests: 60 passing.
@@ -32,6 +32,17 @@ Entry template:
 - Fixed stale browser cache: the browser kept an old `common.js`, so the Discord chip never updated. Pages and static files are now served with `Cache-Control: no-cache` (revalidated via ETag on every load).
 - Top navigation bar is now sticky (stays visible while scrolling). The SOC alert-details panel sticks just below it, and stops sticking on narrow screens where the layout is one column. Removed the large duplicate logo next to the Overview title.
 - Explained terminal output (Uvicorn access log lines from the pages' polling vs. `[!] ALERT` lines), that the organization is fully simulated, and how to connect a Discord webhook via `.env`.
+
+- **Detection rules moved to Sigma-style YAML** (`rules/*.yml`):
+  - `sentinela/rules.py`: loader + compiler using `yaml.safe_load`. Supports logsource categories, selections (mapping / list of mappings / keywords), modifiers (contains, startswith, endswith, re, cidr, gt/gte/lt/lte, exists, all), wildcards, and conditions (and/or/not/parentheses/`1 of`/`all of`/`them`). Correlations: event_count, value_count, temporal, temporal_ordered with group-by and timespan. Broken rules are skipped with a clear error; others keep working.
+  - `sentinela/detection.py`: now runs the loaded ruleset and keeps correlation state; `RULES` dict and hard-coded rule logic removed.
+  - The 7 rules converted 1:1 (SEN-003/004 are correlations built on name-only "building block" rules). Old detection tests pass unchanged against the YAML rules.
+  - `POST /api/v1/rules/reload` + **Reload rules** button; Overview shows rule type, file and load errors; SOC alert details show the rule's known false positives. `GET /api/v1/rules` now returns `{directory, rules, errors}`.
+  - `rules/README.md`: rule-writing guide with a verified lateral movement exercise (SEN-008, 0 false positives in 300 background ticks). Added `pyyaml>=6.0`. Tests: 133 passing.
+
+**Decisions**
+- Sentinela deviation from Sigma: a rule raises alerts only if it has an `id`; `name`-only rules are building blocks (instead of Sigma's `generate`). Field names are Sentinela's own, with common Sigma aliases (Image, CommandLine, ...).
+- SEN-008 (lateral movement) is documented as an exercise, not shipped, so the detection gap remains for the user to close.
 
 **Next**
 - Optional: turn off Uvicorn access logs (`access_log=False` in `start.py`) to keep the terminal quiet.
