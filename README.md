@@ -141,17 +141,17 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 * Some normal activity triggers rules on purpose (an admin running `whoami`, IT creating an account, a big upload to cloud storage), so the SOC must learn to tell false positives apart.
 * Not every attack step has a rule: **lateral movement goes undetected** by default. Finding and closing gaps like this is the job of detection engineering.
 
-### Detection rules
+### Detection rules · [MITRE ATT&CK documentation](https://attack.mitre.org/)
 
 | Rule | Severity | Detects | MITRE |
 |---|---|---|---|
-| SEN-001 | Medium | Discovery commands (whoami, net, nltest, systeminfo) | T1033 / T1087 |
-| SEN-002 | Low | Failed logon for administrator / admin / root | T1110 |
-| SEN-003 | High | Brute force: 5+ failed logons from one source in 60s | T1110 |
-| SEN-004 | Critical | Successful logon after brute force | T1110 / T1078 |
-| SEN-005 | Critical | Known credential theft tool | T1003 |
-| SEN-006 | Medium | New user account created | T1136 |
-| SEN-007 | High | 50 MB+ upload to an external IP | T1048 |
+| SEN-001 | Medium | Discovery commands (whoami, net, nltest, systeminfo) | [T1033](https://attack.mitre.org/techniques/T1033/) / [T1087](https://attack.mitre.org/techniques/T1087/) |
+| SEN-002 | Low | Failed logon for administrator / admin / root | [T1110](https://attack.mitre.org/techniques/T1110/) |
+| SEN-003 | High | Brute force: 5+ failed logons from one source in 60s | [T1110](https://attack.mitre.org/techniques/T1110/) |
+| SEN-004 | Critical | Successful logon after brute force | [T1110](https://attack.mitre.org/techniques/T1110/) / [T1078](https://attack.mitre.org/techniques/T1078/) |
+| SEN-005 | Critical | Known credential theft tool | [T1003](https://attack.mitre.org/techniques/T1003/) |
+| SEN-006 | Medium | New user account created | [T1136](https://attack.mitre.org/techniques/T1136/) |
+| SEN-007 | High | 50 MB+ upload to an external IP | [T1048](https://attack.mitre.org/techniques/T1048/) |
 
 ---
 
