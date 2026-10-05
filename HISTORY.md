@@ -40,13 +40,26 @@ Entry template:
   - `POST /api/v1/rules/reload` + **Reload rules** button; Overview shows rule type, file and load errors; SOC alert details show the rule's known false positives. `GET /api/v1/rules` now returns `{directory, rules, errors}`.
   - `rules/README.md`: rule-writing guide with a verified lateral movement exercise (SEN-008, 0 false positives in 300 background ticks). Added `pyyaml>=6.0`. Tests: 133 passing.
 
+- Committed by the user on `main`: `2ded1b6` (feat: YAML rules) and `b1fb0a8` (docs).
+- The user started writing their **own first rule**: `rules/sen-008-Search-file-Directory.yml` (T1083 File and Directory Discovery). **Not committed, and currently skipped by the loader** because of `logsource: category: file_access` (Sentinela has no file events). Its detection block is still the guide's example (whoami/net), which duplicates SEN-001. A corrected version was explained in chat and tested in a temp folder (not written to the file):
+  - `category: process_creation`
+  - `search_programs` (`process_file`: tree.com, findstr.exe, where.exe, forfiles.exe, find, locate)
+  - `search_commands` (`command_line|contains`: 'dir /s', 'Get-ChildItem -Recurse', 'gci -r')
+  - `filter_it` (user it-admin); condition `1 of search_* and not filter_it`; `level: low`
+  - Verified: catches `dir /s`, `findstr /si password`, `Get-ChildItem -Recurse`; ignores Excel, plain `dir`, it-admin.
+
 **Decisions**
 - Sentinela deviation from Sigma: a rule raises alerts only if it has an `id`; `name`-only rules are building blocks (instead of Sigma's `generate`). Field names are Sentinela's own, with common Sigma aliases (Image, CommandLine, ...).
-- SEN-008 (lateral movement) is documented as an exercise, not shipped, so the detection gap remains for the user to close.
+- The lateral movement rule stays an exercise for the user (documented in `rules/README.md`), not shipped.
+- The user commits directly on `main` themselves; give them the git commands instead of committing for them.
 
-**Next**
-- Optional: turn off Uvicorn access logs (`access_log=False` in `start.py`) to keep the terminal quiet.
-- Commit the simulator work on `phase1-cleanup`.
+**Next** (in this order)
+1. **Finish the user's SEN-008 rule:** replace its contents with the corrected version (or help the user do it), click **Reload rules**, and test it via `POST /api/v1/ingest` (the simulator never generates file-search events). Optionally rename it to `sen-008-file-directory-discovery.yml`. Then the user commits it.
+2. **ID clash to resolve:** `rules/README.md` uses **SEN-008** for the lateral movement exercise, but the user's file rule now uses SEN-008. Do the lateral movement exercise as **SEN-009**, and update the guide's example ID to match.
+3. Optional: add a **"File search" attack scenario** (T1083) to `sentinela/attacks.py`, so SEN-008 can be tested in a real game.
+4. **Security fix** (from the pre-commit check): reject state-changing requests from other origins (CSRF on `/simulation/reset`, `/assets/reset`, `/rules/reload`) and unknown `Host` headers (DNS rebinding). Add tests.
+5. **Next big feature: SQLite storage** for events, alerts, attacks and triage, so games survive restarts. Then search/investigation, then a real Windows agent.
+- Small/optional: turn off Uvicorn access logs (`access_log=False` in `start.py`) to keep the terminal quiet.
 
 ---
 

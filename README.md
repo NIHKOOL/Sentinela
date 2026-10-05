@@ -153,6 +153,7 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 | SEN-005 | Critical | Known credential theft tool | [T1003](https://attack.mitre.org/techniques/T1003/) |
 | SEN-006 | Medium | New user account created | [T1136](https://attack.mitre.org/techniques/T1136/) |
 | SEN-007 | High | 50 MB+ upload to an external IP | [T1048](https://attack.mitre.org/techniques/T1048/) |
+| SEN-008 | Low | File and directory discovery access | [T1083](https://attack.mitre.org/techniques/T1083/) |
 
 Each rule is a file in [`rules/`](rules/). See **[rules/README.md](rules/README.md)** for how to write your own: fields, modifiers, conditions, correlation rules, and an exercise to catch lateral movement.
 
