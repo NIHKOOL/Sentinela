@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinela Overview</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/static/logo-64.png">
+<link rel="apple-touch-icon" href="/static/logo-180.png">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .flow { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; padding: 16px; }
+  .flow .step {
+    flex: 1 1 140px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  }
+  .flow .step strong { display: block; margin-bottom: 2px; }
+  .flow .step span { color: var(--muted); font-size: 12.5px; }
+  .flow .step.attack { border-color: var(--attack); background: var(--attack-soft); }
+  .flow .step.soc { border-color: var(--accent); background: var(--accent-soft); }
+  .flow .arrow { align-self: center; color: var(--muted); font-size: 18px; }
+  .role-card { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .role-card h3 { margin: 0; font-size: 15px; }
+  .role-card p { margin: 0; color: var(--muted); flex: 1; }
+  .role-card .num {
+    width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px;
+  }
+  .role-card.attack .num { background: var(--attack-soft); color: var(--attack); }
+  @media (max-width: 640px) { .flow .arrow { display: none; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">Sentinela <small>SOC Simulator</small></a>
+  <nav class="nav">
+    <a href="/" class="active">Overview</a>
+    <a href="/organization">Organization</a>
+    <a href="/soc">SOC</a>
+    <a href="/attacker">Attacker</a>
+  </nav>
+  <span class="chip"><span class="dot" id="webhook-dot"></span><span id="webhook-text">Discord</span></span>
+  <span class="chip"><span class="dot" id="status-dot"></span><span id="status-text">Connecting…</span></span>
+</header>
+
+<div class="page stack">
+  <div>
+    <h1>Sentinela SOC Simulator</h1>
+    <p class="lead">A practice company with computers and servers. Play the <b>attacker</b> and launch simulated attack steps, then switch to the <b>SOC</b> and try to catch them among normal everyday activity. Everything is simulated: attacks only create fake log entries inside this app.</p>
+  </div>
+
+  <section class="panel">
+    <h2>The big picture <span class="sub">how every event flows through a SIEM</span></h2>
+    <div class="flow">
+      <div class="step"><strong>1. Organization</strong><span>Computers and servers that produce logs</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>2. Activity</strong><span>Normal work every few seconds…</span></div>
+      <div class="step attack"><strong>+ Attacker</strong><span>…mixed with your attack steps</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>3. Detection rules</strong><span>Check each event and patterns over time</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>4. Alerts</strong><span>Real attacks <i>and</i> false alarms</span></div>
+      <div class="arrow">→</div>
+      <div class="step soc"><strong>5. SOC triage</strong><span>Investigate: true or false positive?</span></div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>6. Score</strong><span>What was caught, missed, judged right</span></div>
+    </div>
+  </section>
+
+  <div class="cards">
+    <div class="panel role-card">
+      <div class="num">1</div>
+      <h3>Build the organization</h3>
+      <p>Start with the sample company or add your own workstations and servers.</p>
+      <a class="btn" href="/organization">Open Organization</a>
+    </div>
+    <div class="panel role-card attack">
+      <div class="num">2</div>
+      <h3>Play the attacker</h3>
+      <p>Pick a target and an attack step. Try a full chain: break in, look around, steal, stay, move, take data.</p>
+      <a class="btn danger" href="/attacker">Open Attacker console</a>
+    </div>
+    <div class="panel role-card">
+      <div class="num">3</div>
+      <h3>Defend as the SOC</h3>
+      <p>Work the alert queue. Decide which alerts are real attacks and which are normal work, then close them.</p>
+      <a class="btn primary" href="/soc">Open SOC console</a>
+    </div>
+  </div>
+
+  <div class="grid-main">
+    <section class="panel">
+      <h2>Scoreboard <span class="sub">revealed after you close alerts</span></h2>
+      <div class="panel-body stack">
+        <div class="stats">
+          <div class="panel stat"><div class="label">Attack steps</div><div class="value attack" id="sc-attacks">0</div></div>
+          <div class="panel stat"><div class="label">Detected</div><div class="value ok" id="sc-detected">0</div><div class="hint" id="sc-rate">—</div></div>
+          <div class="panel stat"><div class="label">Missed</div><div class="value high" id="sc-missed">0</div></div>
+          <div class="panel stat"><div class="label">Triage accuracy</div><div class="value" id="sc-accuracy">—</div><div class="hint" id="sc-triaged">0 alerts closed</div></div>
+        </div>
+        <div id="missed"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Alert</th><th>Rule</th><th>Host</th><th>Your verdict</th><th>Truth</th><th></th></tr></thead>
+            <tbody id="debrief"></tbody>
+          </table>
+          <div class="empty" id="debrief-empty">Close alerts in the SOC console to see if your verdicts were right.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="stack">
+      <section class="panel">
+        <h2>Simulation</h2>
+        <div class="panel-body fields">
+          <div class="btn-row">
+            <button class="btn" id="toggle-run" type="button">Pause activity</button>
+            <label class="check">Speed
+              <select id="speed">
+                <option value="1">Busy (every 1s)</option>
+                <option value="3">Normal (every 3s)</option>
+                <option value="6">Quiet (every 6s)</option>
+                <option value="15">Very quiet (every 15s)</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted" style="margin:0">Background activity is the normal work of the organization: logons, programs, file copies, and sometimes admin tasks that look suspicious.</p>
+          <div><button class="btn bad" id="reset" type="button">Start a new game</button></div>
+          <p class="muted" style="margin:0">Clears all events, alerts, attacks and the score. Keeps the organization.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>Detection rules <span class="sub">what the SIEM looks for (sentinela/detection.py)</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Rule</th><th>Severity</th><th>Name</th><th>MITRE ATT&amp;CK</th><th>What it detects</th></tr></thead>
+        <tbody id="rules"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+const { api, el, badge, severityBadge, toast, poll } = S;
+const VERDICT = { true_positive: "True positive", false_positive: "False positive" };
+let running = true;
+
+async function loadRules() {
+  const rules = await api("/rules");
+  document.getElementById("rules").replaceChildren(...rules.map((r) => el("tr", {}, [
+    el("td", {}, el("code", { text: r.id })),
+    el("td", {}, severityBadge(r.severity)),
+    el("td", { text: r.name }),
+    el("td", {}, el("code", { text: r.mitre })),
+    el("td", { class: "wrap", text: r.description }),
+  ])));
+}
+
+async function refresh() {
+  const [score, sim] = await Promise.all([api("/score"), api("/simulation")]);
+
+  document.getElementById("sc-attacks").textContent = score.attacks_launched;
+  document.getElementById("sc-detected").textContent = score.attacks_detected;
+  document.getElementById("sc-missed").textContent = score.attacks_missed;
+  document.getElementById("sc-rate").textContent =
+    score.detection_rate === null ? "—" : `${Math.round(score.detection_rate * 100)}% detection rate`;
+  document.getElementById("sc-accuracy").textContent =
+    score.triage_accuracy === null ? "—" : `${Math.round(score.triage_accuracy * 100)}%`;
+  document.getElementById("sc-triaged").textContent =
+    `${score.alerts_triaged} closed · ${score.triage_correct} right · ${score.alerts_open} still open`;
+
+  const missed = document.getElementById("missed");
+  missed.replaceChildren(...(score.missed_attacks.length ? [
+    el("div", { class: "muted", text: "Attack steps no rule caught. How could you detect these?" }),
+    el("div", { class: "btn-row", style: "margin-top:6px" }, score.missed_attacks.map((a) =>
+      badge(`${a.name} → ${a.target}`, "attack"))),
+  ] : []));
+
+  document.getElementById("debrief-empty").classList.toggle("hidden", score.debrief.length > 0);
+  document.getElementById("debrief").replaceChildren(...score.debrief.map((d) => el("tr", {}, [
+    el("td", { text: `#${d.alert_id}` }),
+    el("td", {}, [el("code", { text: d.rule_id }), " ", d.rule_name]),
+    el("td", { text: d.hostname }),
+    el("td", { text: VERDICT[d.verdict] }),
+    el("td", { text: VERDICT[d.truth] }),
+    el("td", {}, d.correct ? badge("Correct", "ok") : badge("Wrong", "bad")),
+  ])));
+
+  running = sim.running;
+  document.getElementById("toggle-run").textContent = running ? "Pause activity" : "Resume activity";
+  const speed = document.getElementById("speed");
+  if (document.activeElement !== speed) speed.value = String(sim.interval_seconds);
+}
+
+document.getElementById("toggle-run").addEventListener("click", async () => {
+  await api("/simulation", { method: "PATCH", body: { running: !running } });
+  refresh();
+});
+
+document.getElementById("speed").addEventListener("change", async (e) => {
+  await api("/simulation", { method: "PATCH", body: { interval_seconds: Number(e.target.value) } });
+  toast("Speed updated");
+});
+
+document.getElementById("reset").addEventListener("click", async () => {
+  if (!confirm("Start a new game? All events, alerts, attacks and the score will be cleared.")) return;
+  await api("/simulation/reset", { method: "POST" });
+  toast("New game started");
+  refresh();
+});
+
+loadRules();
+poll(refresh, 3000);
+</script>
+</body>
+</html>
