@@ -159,6 +159,14 @@ tr.selected td { background: var(--row-selected); }
 .badge.attack { background: var(--attack-soft); color: var(--attack); }
 .badge + .badge { margin-left: 4px; }
 
+/* Rule load errors */
+.rule-errors {
+  margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px;
+  background: var(--high-bg); color: var(--high); font-size: 13px; overflow-wrap: anywhere;
+}
+.rule-errors ul { margin: 6px 0 0; padding-left: 18px; }
+.rule-errors code { color: var(--text); }
+
 /* Toast */
 .toast {
   position: fixed; right: 20px; bottom: 20px; max-width: min(420px, calc(100vw - 40px));

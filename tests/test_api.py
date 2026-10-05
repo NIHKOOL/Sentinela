@@ -123,3 +123,53 @@ def test_simulation_settings_and_reset(client):
     stats = client.get("/api/v1/stats").json()
     assert stats["events_total"] == 0
     assert stats["attacks_total"] == 0
+
+
+# --- Detection rules ---
+
+LATERAL_MOVEMENT_RULE = """
+title: Admin logon from a non-IT workstation
+id: SEN-008
+level: high
+tags: [attack.lateral_movement, attack.t1021]
+logsource:
+  category: authentication
+detection:
+  selection:
+    event_type: authentication_success
+    user: [administrator, root]
+    source_ip|cidr: 10.0.0.0/8
+  it_workstation:
+    source_ip: 10.0.1.20
+  condition: selection and not it_workstation
+"""
+
+
+def test_rules_endpoint_lists_shipped_rules(client):
+    data = client.get("/api/v1/rules").json()
+    assert data["errors"] == []
+    assert [r["id"] for r in data["rules"]] == [f"SEN-00{n}" for n in range(1, 8)]
+    brute_force = data["rules"][2]
+    assert brute_force["type"] == "event_count"
+    assert brute_force["file"].startswith("sen-003-brute-force.yml")
+    assert brute_force["falsepositives"]
+
+
+def test_reload_picks_up_new_and_broken_rules(tmp_path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    client = TestClient(create_app(seed=1, rules_dir=rules_dir))
+    assert client.get("/api/v1/rules").json()["rules"] == []
+
+    # The lateral movement gap is not detected without a rule...
+    attack = {"scenario": "lateral_movement", "target_id": asset_id(client, "DB01"), "source_id": asset_id(client, "WS-BOB")}
+    assert client.post("/api/v1/attacks", json=attack).json()["detected"] is False
+
+    # ...add the rule plus a broken file, reload, and it is
+    (rules_dir / "sen-008-lateral-movement.yml").write_text(LATERAL_MOVEMENT_RULE, encoding="utf-8")
+    (rules_dir / "broken.yml").write_text("title: [oops", encoding="utf-8")
+    data = client.post("/api/v1/rules/reload").json()
+    assert [r["id"] for r in data["rules"]] == ["SEN-008"]
+    assert len(data["errors"]) == 1 and "broken.yml" in data["errors"][0]
+
+    assert client.post("/api/v1/attacks", json=attack).json()["detected_by"] == ["SEN-008"]

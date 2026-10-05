@@ -1,0 +1,37 @@
+# Two rules in one file, separated by "---".
+# 1. A building block with only a "name" (no "id"), so it never raises alerts by itself.
+title: Failed logon
+name: failed_logon
+description: Any failed logon. Used by the brute force correlation below.
+logsource:
+  category: authentication
+detection:
+  selection:
+    event_type: authentication_failure
+  condition: selection
+---
+# 2. The correlation: count failed logons per host + source IP over time.
+title: "Brute force: many failed logons"
+id: SEN-003
+name: brute_force_logons    # lets SEN-004 build on this rule
+status: stable
+description: 5 or more failed logons from the same source to the same host within 60 seconds.
+author: Sentinela
+date: 2026-10-06
+tags:
+  - attack.credential_access
+  - attack.t1110   # Brute Force
+correlation:
+  type: event_count
+  rules:
+    - failed_logon
+  group-by:
+    - hostname
+    - source_ip
+  timespan: 60s
+  condition:
+    gte: 5
+falsepositives:
+  - A script or service with an old saved password retrying again and again
+level: high
+details: "{count} failed logons on {hostname} from {source_ip} within {timespan}."

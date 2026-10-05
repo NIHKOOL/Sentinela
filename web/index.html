@@ -132,12 +132,19 @@
   </div>
 
   <section class="panel">
-    <h2>Detection rules <span class="sub">what the SIEM looks for (sentinela/detection.py)</span></h2>
+    <h2>Detection rules
+      <span class="btn-row">
+        <span class="sub">Sigma-style YAML files in the <code>rules/</code> folder</span>
+        <button class="btn small" id="reload-rules" type="button">Reload rules</button>
+      </span>
+    </h2>
+    <div class="rule-errors hidden" id="rule-errors"></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Rule</th><th>Severity</th><th>Name</th><th>MITRE ATT&amp;CK</th><th>What it detects</th></tr></thead>
+        <thead><tr><th>Rule</th><th>Severity</th><th>Name</th><th>Type</th><th>MITRE ATT&amp;CK</th><th>What it detects</th><th>File</th></tr></thead>
         <tbody id="rules"></tbody>
       </table>
+      <div class="empty hidden" id="rules-empty">No rules loaded. Add .yml files to the rules/ folder and click Reload rules.</div>
     </div>
   </section>
 </div>
@@ -148,16 +155,47 @@ const { api, el, badge, severityBadge, toast, poll } = S;
 const VERDICT = { true_positive: "True positive", false_positive: "False positive" };
 let running = true;
 
-async function loadRules() {
-  const rules = await api("/rules");
-  document.getElementById("rules").replaceChildren(...rules.map((r) => el("tr", {}, [
+const RULE_TYPES = {
+  detection: "Single event",
+  event_count: "Correlation: count",
+  value_count: "Correlation: distinct values",
+  temporal: "Correlation: together",
+  temporal_ordered: "Correlation: in order",
+};
+
+function renderRules(data) {
+  document.getElementById("rules-empty").classList.toggle("hidden", data.rules.length > 0);
+  document.getElementById("rules").replaceChildren(...data.rules.map((r) => el("tr", {}, [
     el("td", {}, el("code", { text: r.id })),
     el("td", {}, severityBadge(r.severity)),
     el("td", { text: r.name }),
-    el("td", {}, el("code", { text: r.mitre })),
+    el("td", {}, badge(RULE_TYPES[r.type] || r.type, r.type === "detection" ? "" : "info")),
+    el("td", {}, el("code", { text: r.mitre || "—" })),
     el("td", { class: "wrap", text: r.description }),
+    el("td", { class: "muted" }, el("code", { text: r.file })),
   ])));
+
+  const box = document.getElementById("rule-errors");
+  box.classList.toggle("hidden", data.errors.length === 0);
+  box.replaceChildren(
+    el("b", { text: `${data.errors.length} rule problem${data.errors.length === 1 ? "" : "s"}: these rules were skipped` }),
+    el("ul", {}, data.errors.map((e) => el("li", {}, el("code", { text: e })))),
+  );
 }
+
+async function loadRules() {
+  renderRules(await api("/rules"));
+}
+
+document.getElementById("reload-rules").addEventListener("click", async () => {
+  try {
+    const data = await api("/rules/reload", { method: "POST" });
+    renderRules(data);
+    toast(data.errors.length
+      ? `Loaded ${data.rules.length} rules, ${data.errors.length} with problems`
+      : `Loaded ${data.rules.length} rules`, data.errors.length ? "err" : "");
+  } catch (e) { toast(e.message, "err"); }
+});
 
 async function refresh() {
   const [score, sim] = await Promise.all([api("/score"), api("/simulation")]);

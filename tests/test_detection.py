@@ -1,9 +1,13 @@
+"""The shipped rules in rules/ must keep detecting what they are meant to detect."""
 from datetime import timedelta
 
 import pytest
 
-from sentinela.detection import Detector, is_external
+from sentinela.detection import Detector
 from sentinela.models import TelemetryEvent, utc_now
+from sentinela.rules import load_rules
+
+RULESET = load_rules()
 
 
 def event(**overrides) -> TelemetryEvent:
@@ -17,25 +21,25 @@ def rule_ids(matches) -> list[str]:
 
 
 def test_normal_program_does_not_match():
-    assert Detector().evaluate(1, event()) == []
+    assert Detector(RULESET).evaluate(1, event()) == []
 
 
 @pytest.mark.parametrize("process_name", ["whoami.exe", "WHOAMI.EXE", r"C:\Windows\System32\whoami.exe", "/usr/bin/whoami"])
 def test_discovery_matches_regardless_of_path_and_case(process_name):
-    assert rule_ids(Detector().evaluate(1, event(process_name=process_name))) == ["SEN-001"]
+    assert rule_ids(Detector(RULESET).evaluate(1, event(process_name=process_name))) == ["SEN-001"]
 
 
 def test_credential_tool_is_critical_rule():
-    assert rule_ids(Detector().evaluate(1, event(process_name=r"C:\Users\Public\credential_dumper.exe"))) == ["SEN-005"]
+    assert rule_ids(Detector(RULESET).evaluate(1, event(process_name=r"C:\Users\Public\credential_dumper.exe"))) == ["SEN-005"]
 
 
 def test_single_typo_is_not_brute_force():
-    matches = Detector().evaluate(1, event(event_type="authentication_failure", source_ip="10.0.1.11"))
+    matches = Detector(RULESET).evaluate(1, event(event_type="authentication_failure", source_ip="10.0.1.11"))
     assert matches == []
 
 
 def test_brute_force_needs_five_failures_within_window():
-    detector = Detector()
+    detector = Detector(RULESET)
     start = utc_now()
     results = [
         detector.evaluate(i, event(event_type="authentication_failure", user="bob", source_ip="203.0.113.5",
@@ -48,7 +52,7 @@ def test_brute_force_needs_five_failures_within_window():
 
 
 def test_slow_failures_outside_window_are_not_brute_force():
-    detector = Detector()
+    detector = Detector(RULESET)
     start = utc_now()
     for i in range(1, 8):
         matches = detector.evaluate(i, event(event_type="authentication_failure", user="bob", source_ip="203.0.113.5",
@@ -57,7 +61,7 @@ def test_slow_failures_outside_window_are_not_brute_force():
 
 
 def test_success_after_brute_force_is_critical():
-    detector = Detector()
+    detector = Detector(RULESET)
     start = utc_now()
     for i in range(5):
         detector.evaluate(i, event(event_type="authentication_failure", source_ip="203.0.113.5",
@@ -67,18 +71,18 @@ def test_success_after_brute_force_is_critical():
 
 
 def test_success_from_other_ip_is_fine():
-    detector = Detector()
+    detector = Detector(RULESET)
     for i in range(5):
         detector.evaluate(i, event(event_type="authentication_failure", source_ip="203.0.113.5"))
     assert detector.evaluate(99, event(event_type="authentication_success", source_ip="10.0.1.11")) == []
 
 
 def test_privileged_logon_failure():
-    assert rule_ids(Detector().evaluate(1, event(event_type="authentication_failure", user="Administrator"))) == ["SEN-002"]
+    assert rule_ids(Detector(RULESET).evaluate(1, event(event_type="authentication_failure", user="Administrator"))) == ["SEN-002"]
 
 
 def test_account_created():
-    assert rule_ids(Detector().evaluate(1, event(event_type="account_created", target_user="x"))) == ["SEN-006"]
+    assert rule_ids(Detector(RULESET).evaluate(1, event(event_type="account_created", target_user="x"))) == ["SEN-006"]
 
 
 @pytest.mark.parametrize("dest_ip,bytes_out,expected", [
@@ -88,14 +92,35 @@ def test_account_created():
 ])
 def test_large_upload_to_internet(dest_ip, bytes_out, expected):
     e = event(event_type="network_connection", dest_ip=dest_ip, bytes_out=bytes_out)
-    assert rule_ids(Detector().evaluate(1, e)) == expected
+    assert rule_ids(Detector(RULESET).evaluate(1, e)) == expected
 
 
-def test_is_external():
-    assert is_external("203.0.113.7")
-    assert not is_external("10.0.0.1")
-    assert not is_external("192.168.1.5")
-    assert not is_external("not-an-ip")
+def test_shipped_rules_load_without_errors():
+    assert RULESET.errors == []
+    assert [meta.id for meta in RULESET.alerting] == [f"SEN-00{n}" for n in range(1, 8)]
+
+
+def test_building_block_rules_do_not_alert_by_themselves():
+    # failed_logon and successful_logon only feed the correlations
+    assert Detector(RULESET).evaluate(1, event(event_type="authentication_success", source_ip="10.0.1.11")) == []
+
+
+@pytest.mark.parametrize("dest_ip", ["192.168.1.5", "172.20.0.9", "127.0.0.1"])
+def test_large_upload_to_other_private_ranges_is_internal(dest_ip):
+    e = event(event_type="network_connection", dest_ip=dest_ip, bytes_out=300_000_000)
+    assert Detector(RULESET).evaluate(1, e) == []
+
+
+def test_large_upload_without_destination_is_ignored():
+    e = event(event_type="network_connection", bytes_out=300_000_000)
+    assert Detector(RULESET).evaluate(1, e) == []
+
+
+def test_alert_details_are_filled_in():
+    [match] = Detector(RULESET).evaluate(1, event(process_name=r"C:\Windows\System32\WHOAMI.EXE"))
+    assert match.details == "'whoami.exe' was run by 'alice' on WS-ALICE."
+    [match] = Detector(RULESET).evaluate(1, event(event_type="authentication_failure", user="root"))
+    assert match.details == "Failed logon for 'root' on WS-ALICE from unknown."
 
 
 def test_timestamp_without_timezone_is_utc():

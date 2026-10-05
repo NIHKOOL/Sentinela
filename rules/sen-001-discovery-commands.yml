@@ -1,0 +1,26 @@
+title: Discovery command executed
+id: SEN-001
+status: stable
+description: A built-in tool attackers use to learn about a system (whoami, net, nltest, systeminfo) was run.
+author: Sentinela
+date: 2026-10-06
+tags:
+  - attack.discovery
+  - attack.t1033   # System Owner/User Discovery
+  - attack.t1087   # Account Discovery
+logsource:
+  category: process_creation
+detection:
+  selection:
+    process_file:      # file name only, so it matches any folder and upper/lower case
+      - whoami.exe
+      - whoami         # Linux
+      - net.exe
+      - net1.exe
+      - nltest.exe
+      - systeminfo.exe
+  condition: selection
+falsepositives:
+  - Administrators checking a server (for example it-admin running whoami or systeminfo)
+level: medium
+details: "'{process_file}' was run by '{user}' on {hostname}."

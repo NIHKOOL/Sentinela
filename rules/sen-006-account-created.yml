@@ -1,0 +1,19 @@
+title: New user account created
+id: SEN-006
+status: stable
+description: A new user account was created. Attackers do this to keep access.
+author: Sentinela
+date: 2026-10-06
+tags:
+  - attack.persistence
+  - attack.t1136   # Create Account
+logsource:
+  category: account_management
+detection:
+  selection:
+    event_type: account_created
+  condition: selection
+falsepositives:
+  - IT creating accounts for new employees
+level: medium
+details: "'{user}' created account '{target_user}' on {hostname}."

@@ -1,0 +1,23 @@
+title: Logon failure for privileged account
+id: SEN-002
+status: stable
+description: A failed logon for administrator, admin or root.
+author: Sentinela
+date: 2026-10-06
+tags:
+  - attack.credential_access
+  - attack.t1110   # Brute Force
+logsource:
+  category: authentication
+detection:
+  selection:
+    event_type: authentication_failure
+    user:
+      - administrator
+      - admin
+      - root
+  condition: selection
+falsepositives:
+  - An administrator mistyping their password
+level: low
+details: "Failed logon for '{user}' on {hostname} from {source_ip}."

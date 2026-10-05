@@ -1,0 +1,33 @@
+title: Successful logon
+name: successful_logon
+description: Any successful logon. Used by the correlation below.
+logsource:
+  category: authentication
+detection:
+  selection:
+    event_type: authentication_success
+  condition: selection
+---
+title: Successful logon after brute force
+id: SEN-004
+status: stable
+description: A successful logon from a source that triggered a brute force alert in the last 10 minutes.
+author: Sentinela
+date: 2026-10-06
+tags:
+  - attack.credential_access
+  - attack.t1110   # Brute Force
+  - attack.t1078   # Valid Accounts
+correlation:
+  type: temporal_ordered     # first brute force, then a successful logon
+  rules:
+    - brute_force_logons     # the SEN-003 correlation
+    - successful_logon
+  group-by:
+    - hostname
+    - source_ip
+  timespan: 10m
+falsepositives:
+  - A user who forgot their password and finally typed it correctly
+level: critical
+details: "'{user}' logged on to {hostname} from {source_ip}, which was brute forcing this host."

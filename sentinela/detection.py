@@ -1,146 +1,114 @@
-"""Detection engine: rules that turn events into alerts.
+"""Detection engine: runs the YAML rules (see rules/ and sentinela/rules.py) against events.
 
-Single-event rules look at one event. Correlation rules (SEN-003, SEN-004)
-remember earlier events and look for a pattern over time.
+Detection rules look at one event. Correlation rules remember earlier matches
+and look for a pattern over time, separately for each group-by value
+(for example each host + source IP pair).
 """
-import ntpath
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from ipaddress import ip_address, ip_network
+from datetime import datetime
+from typing import Optional
 
 from .models import TelemetryEvent
-
-RULES = {
-    "SEN-001": {
-        "name": "Discovery command executed",
-        "severity": "MEDIUM",
-        "mitre": "T1033 / T1087",
-        "description": "A built-in tool attackers use to learn about a system (whoami, net, nltest, systeminfo) was run.",
-    },
-    "SEN-002": {
-        "name": "Logon failure for privileged account",
-        "severity": "LOW",
-        "mitre": "T1110",
-        "description": "A failed logon for administrator, admin or root.",
-    },
-    "SEN-003": {
-        "name": "Brute force: many failed logons",
-        "severity": "HIGH",
-        "mitre": "T1110",
-        "description": "5 or more failed logons from the same source to the same host within 60 seconds.",
-    },
-    "SEN-004": {
-        "name": "Successful logon after brute force",
-        "severity": "CRITICAL",
-        "mitre": "T1110 / T1078",
-        "description": "A successful logon from a source that triggered a brute force alert in the last 10 minutes.",
-    },
-    "SEN-005": {
-        "name": "Known credential theft tool",
-        "severity": "CRITICAL",
-        "mitre": "T1003",
-        "description": "A process name matches a known password-stealing tool.",
-    },
-    "SEN-006": {
-        "name": "New user account created",
-        "severity": "MEDIUM",
-        "mitre": "T1136",
-        "description": "A new user account was created. Attackers do this to keep access.",
-    },
-    "SEN-007": {
-        "name": "Large upload to the internet",
-        "severity": "HIGH",
-        "mitre": "T1048",
-        "description": "50 MB or more sent from an internal host to an external IP in one connection.",
-    },
-}
-
-DISCOVERY_TOOLS = {"whoami.exe", "whoami", "net.exe", "net1.exe", "nltest.exe", "systeminfo.exe"}
-CREDENTIAL_TOOLS = {"mimikatz.exe", "credential_dumper.exe", "credential_dumper"}
-PRIVILEGED_USERS = {"administrator", "admin", "root"}
-LARGE_UPLOAD_BYTES = 50_000_000
-INTERNAL_NETWORKS = [ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8")]
+from .rules import CorrelationRule, RuleMeta, RuleSet, event_fields, load_rules
 
 
 @dataclass
 class Match:
-    rule_id: str
+    rule: RuleMeta
     details: str
     event_ids: list[int]
 
-
-def normalize_process_name(process_name: str) -> str:
-    # "C:\Windows\System32\WHOAMI.EXE" -> "whoami.exe" (ntpath handles both \ and /)
-    return ntpath.basename(process_name).lower()
-
-
-def is_external(ip: str) -> bool:
-    try:
-        address = ip_address(ip)
-    except ValueError:
-        return False
-    return not any(address in network for network in INTERNAL_NETWORKS)
+    @property
+    def rule_id(self) -> str:
+        return self.rule.id
 
 
 class Detector:
-    def __init__(self, threshold: int = 5, window: timedelta = timedelta(seconds=60),
-                 follow_up: timedelta = timedelta(minutes=10)):
-        self.threshold = threshold
-        self.window = window
-        self.follow_up = follow_up
+    def __init__(self, ruleset: Optional[RuleSet] = None):
+        self.ruleset = ruleset if ruleset is not None else load_rules()
         self.reset()
 
     def reset(self):
-        # (hostname, source_ip) -> recent failures as (timestamp, event_id)
-        self._failures: dict[tuple[str, str], deque[tuple[datetime, int]]] = defaultdict(deque)
-        # (hostname, source_ip) -> when that pair last crossed the brute force threshold
-        self._brute_forced: dict[tuple[str, str], datetime] = {}
+        # (correlation key, group-by values) -> what that correlation remembers for that group
+        self._state: dict[tuple, object] = {}
 
     def evaluate(self, event_id: int, event: TelemetryEvent) -> list[Match]:
-        matches = []
-        host = event.hostname.lower()
+        fields = event_fields(event)
+        hits: dict[str, list[int]] = {}   # rule name -> event ids, for correlations further down
+        matches: list[Match] = []
 
-        if event.event_type == "process_creation" and event.process_name:
-            process = normalize_process_name(event.process_name)
-            if process in DISCOVERY_TOOLS:
-                matches.append(Match("SEN-001", f"'{process}' was run by '{event.user}' on {event.hostname}.", [event_id]))
-            if process in CREDENTIAL_TOOLS:
-                matches.append(Match("SEN-005", f"Credential theft tool '{process}' was run by '{event.user}' on {event.hostname}.", [event_id]))
+        for rule in self.ruleset.detections:
+            if rule.matches(fields):
+                if rule.meta.name:
+                    hits[rule.meta.name] = [event_id]
+                if rule.meta.alerting:
+                    matches.append(Match(rule.meta, rule.meta.render(fields), [event_id]))
 
-        elif event.event_type == "authentication_failure":
-            source = event.source_ip or "an unknown source"
-            if event.user.lower() in PRIVILEGED_USERS:
-                matches.append(Match("SEN-002", f"Failed logon for '{event.user}' on {event.hostname} from {source}.", [event_id]))
-            if event.source_ip:
-                key = (host, event.source_ip)
-                failures = self._failures[key]
-                failures.append((event.timestamp, event_id))
-                while failures and event.timestamp - failures[0][0] > self.window:
-                    failures.popleft()
-                if len(failures) >= self.threshold:
-                    self._brute_forced[key] = event.timestamp
-                    matches.append(Match(
-                        "SEN-003",
-                        f"{len(failures)} failed logons on {event.hostname} from {event.source_ip} within {int(self.window.total_seconds())}s.",
-                        [failed_id for _, failed_id in failures],
-                    ))
-
-        elif event.event_type == "authentication_success" and event.source_ip:
-            brute_forced_at = self._brute_forced.get((host, event.source_ip))
-            if brute_forced_at and timedelta(0) <= event.timestamp - brute_forced_at <= self.follow_up:
-                matches.append(Match(
-                    "SEN-004",
-                    f"'{event.user}' logged on to {event.hostname} from {event.source_ip}, which was brute forcing this host.",
-                    [event_id],
-                ))
-
-        elif event.event_type == "account_created":
-            matches.append(Match("SEN-006", f"'{event.user}' created account '{event.target_user}' on {event.hostname}.", [event_id]))
-
-        elif event.event_type == "network_connection":
-            if (event.bytes_out or 0) >= LARGE_UPLOAD_BYTES and event.dest_ip and is_external(event.dest_ip):
-                size_mb = event.bytes_out // 1_000_000
-                matches.append(Match("SEN-007", f"{event.hostname} sent {size_mb} MB to external IP {event.dest_ip}.", [event_id]))
+        # Correlations run in dependency order, so one correlation can build on another
+        for correlation in self.ruleset.correlations:
+            hit_names = [name for name in correlation.rules if name in hits]
+            if not hit_names:
+                continue
+            group = tuple(fields.get(f) for f in correlation.group_by)
+            if any(value is None for value in group):
+                continue
+            result = self._update(correlation, group, event.timestamp, event_id, fields, hit_names, hits)
+            if result is None:
+                continue
+            event_ids, extra = result
+            if correlation.meta.name:
+                hits[correlation.meta.name] = event_ids
+            if correlation.meta.alerting:
+                values = {**fields, **extra, "timespan": correlation.timespan_text}
+                matches.append(Match(correlation.meta, correlation.meta.render(values), event_ids))
 
         return matches
+
+    def _update(self, correlation: CorrelationRule, group: tuple, now: datetime, event_id: int,
+                fields: dict, hit_names: list[str], hits: dict[str, list[int]]):
+        """Record this event for the correlation. Returns (event_ids, extra values) when it fires."""
+        key = (correlation.meta.key, group)
+
+        if correlation.type == "event_count":
+            window = self._state.setdefault(key, deque())
+            window.append((now, event_id))
+            self._forget_old(window, now, correlation)
+            if correlation.threshold(len(window)):
+                return [e for _, e in window], {"count": len(window)}
+            return None
+
+        if correlation.type == "value_count":
+            value = fields.get(correlation.value_field)
+            if value is None:
+                return None
+            window = self._state.setdefault(key, deque())
+            window.append((now, event_id, str(value).lower()))
+            self._forget_old(window, now, correlation)
+            distinct = {v for _, _, v in window}
+            if correlation.threshold(len(distinct)):
+                return [e for _, e, _ in window], {"count": len(distinct)}
+            return None
+
+        # temporal / temporal_ordered: all referenced rules matched within the timespan
+        seen = self._state.setdefault(key, {})
+        for name in hit_names:
+            seen[name] = (now, hits[name])
+        for name in list(seen):
+            if now - seen[name][0] > correlation.timespan:
+                del seen[name]
+        if any(name not in seen for name in correlation.rules):
+            return None
+        if correlation.type == "temporal_ordered":
+            if correlation.rules[-1] not in hit_names:
+                return None
+            times = [seen[name][0] for name in correlation.rules]
+            if any(earlier > later for earlier, later in zip(times, times[1:])):
+                return None
+        event_ids = list(dict.fromkeys(e for name in correlation.rules for e in seen[name][1]))
+        return event_ids, {"count": len(event_ids)}
+
+    @staticmethod
+    def _forget_old(window: deque, now: datetime, correlation: CorrelationRule):
+        while window and now - window[0][0] > correlation.timespan:
+            window.popleft()

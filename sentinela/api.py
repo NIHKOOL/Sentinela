@@ -12,9 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .alerting import DiscordNotifier
 from .attacks import SCENARIOS
-from .detection import RULES
 from .models import AlertUpdate, AssetIn, AttackRequest, SimulationSettings, TelemetryEvent
 from .organization import Organization
+from .rules import DEFAULT_RULES_DIR, RuleSet, load_rules
 from .simulation import Simulation
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -73,9 +73,25 @@ def reset_assets(request: Request):
 
 # --- Rules and scenarios (reference data) ---
 
+def _rules_response(ruleset: RuleSet) -> dict:
+    return {
+        "directory": str(ruleset.directory) if ruleset.directory else None,
+        "rules": [meta.to_dict() for meta in ruleset.alerting],
+        "errors": ruleset.errors,
+    }
+
+
 @router.get("/rules")
-def list_rules():
-    return [{"id": rule_id, **rule} for rule_id, rule in RULES.items()]
+def list_rules(request: Request):
+    return _rules_response(get_sim(request).ruleset)
+
+
+@router.post("/rules/reload")
+def reload_rules(request: Request):
+    """Read the rule files again, so edited or new rules work without restarting."""
+    ruleset = _load_and_report(request.app.state.rules_dir)
+    get_sim(request).reload_rules(ruleset)
+    return _rules_response(ruleset)
 
 
 @router.get("/scenarios")
@@ -193,6 +209,14 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
+def _load_and_report(rules_dir: Path) -> RuleSet:
+    ruleset = load_rules(rules_dir)
+    print(f"[*] Loaded {len(ruleset.alerting)} detection rules from {rules_dir}")
+    for error in ruleset.errors:
+        print(f"[-] Rule error: {error}")
+    return ruleset
+
+
 def _page(filename: str):
     def serve():
         return FileResponse(WEB_DIR / filename)
@@ -200,11 +224,13 @@ def _page(filename: str):
 
 
 def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict], None]] = None,
-               seed: Optional[int] = None) -> FastAPI:
+               seed: Optional[int] = None, rules_dir: Path = DEFAULT_RULES_DIR) -> FastAPI:
     """Build the app. Without `data_dir` the organization is kept in memory only (used by tests)."""
-    app = FastAPI(title="Sentinela SOC Simulator", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Sentinela SOC Simulator", version="0.3.0", lifespan=lifespan)
     organization = Organization(data_dir / "organization.json" if data_dir else None)
-    app.state.simulation = Simulation(organization, notify or (lambda alert: None), seed)
+    app.state.rules_dir = Path(rules_dir)
+    ruleset = _load_and_report(app.state.rules_dir)
+    app.state.simulation = Simulation(organization, notify or (lambda alert: None), seed, ruleset)
     app.state.webhook_configured = bool(getattr(notify, "configured", False))
 
     app.include_router(router)
@@ -235,5 +261,6 @@ def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict]
 load_dotenv()
 app = create_app(
     data_dir=Path(os.getenv("SENTINELA_DATA_DIR", "data")),
+    rules_dir=Path(os.getenv("SENTINELA_RULES_DIR", DEFAULT_RULES_DIR)),
     notify=DiscordNotifier(os.getenv("DISCORD_WEBHOOK_URL", ""), os.getenv("DISCORD_MIN_SEVERITY", "HIGH")),
 )

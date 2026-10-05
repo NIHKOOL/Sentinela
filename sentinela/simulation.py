@@ -15,9 +15,10 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from . import activity, attacks
-from .detection import RULES, Detector, Match
+from .detection import Detector, Match
 from .models import AlertUpdate, AttackRequest, TelemetryEvent, utc_now
 from .organization import Organization
+from .rules import RuleSet, load_rules
 
 MAX_EVENTS = 5000
 # Repeats of the same rule for the same host/user/source within this time join the existing alert
@@ -27,11 +28,12 @@ HIDDEN_EVENT_FIELDS = {"origin"}
 
 class Simulation:
     def __init__(self, organization: Organization, notify: Callable[[dict], None] = lambda alert: None,
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None, ruleset: Optional[RuleSet] = None):
         self.org = organization
         self.notify = notify
         self.rng = random.Random(seed)
-        self.detector = Detector()
+        self.ruleset = ruleset if ruleset is not None else load_rules()
+        self.detector = Detector(self.ruleset)
         self.lock = threading.RLock()
         self.running = True
         self.interval_seconds = 3.0
@@ -47,6 +49,12 @@ class Simulation:
             self.attack_by_event: dict[int, int] = {}
             self._counters = {"event": 0, "alert": 0, "attack": 0}
             self.detector.reset()
+
+    def reload_rules(self, ruleset: RuleSet):
+        """Switch to newly loaded rules. Correlation memory (e.g. recent failed logons) starts empty."""
+        with self.lock:
+            self.ruleset = ruleset
+            self.detector = Detector(ruleset)
 
     def _next_id(self, kind: str) -> int:
         self._counters[kind] += 1
@@ -90,14 +98,14 @@ class Simulation:
                 alert["last_seen"] = max(datetime.fromisoformat(alert["last_seen"]), event.timestamp).isoformat()
                 return alert, False
 
-        rule = RULES[match.rule_id]
+        rule = match.rule
         asset = self.org.find_by_hostname(event.hostname)
         alert = {
             "id": self._next_id("alert"),
-            "rule_id": match.rule_id,
-            "rule_name": rule["name"],
-            "severity": rule["severity"],
-            "mitre": rule["mitre"],
+            "rule_id": rule.id,
+            "rule_name": rule.title,
+            "severity": rule.severity,
+            "mitre": rule.mitre,
             "details": match.details,
             "hostname": event.hostname,
             "asset_criticality": asset.criticality if asset else None,

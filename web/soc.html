@@ -229,6 +229,12 @@ async function renderDetail() {
       el("b", { text: EVENT_LABELS[e.event_type] || e.event_type }), ` · ${e.user}`,
       el("code", { class: "sub-line", text: describeEvent(e) }),
     ]))),
+    rule.falsepositives && rule.falsepositives.length
+      ? el("div", {}, [
+          el("div", { class: "section-title", text: "Known false positives" }),
+          el("ul", { class: "tips" }, rule.falsepositives.map((fp) => el("li", { text: fp }))),
+        ])
+      : null,
     el("div", { class: "section-title", text: "Investigate" }),
     el("ul", { class: "tips" }, [
       el("li", { text: "Is the user someone who normally works on this host (see Known users)?" }),
@@ -286,8 +292,8 @@ document.getElementById("pause").addEventListener("click", (e) => {
 });
 
 (async () => {
-  const ruleList = await api("/rules");
-  rules = Object.fromEntries(ruleList.map((r) => [r.id, r]));
+  const ruleData = await api("/rules");
+  rules = Object.fromEntries(ruleData.rules.map((r) => [r.id, r]));
   await loadAssets();
   const linked = Number(new URLSearchParams(location.search).get("alert"));
   if (linked) await select(linked);  // e.g. /soc?alert=6
