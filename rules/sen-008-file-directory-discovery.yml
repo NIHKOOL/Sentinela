@@ -1,0 +1,33 @@
+title: File and directory discovery      # required: shown in alerts
+id: SEN-008                            # required to raise alerts
+status: experimental
+description: A command that searches or lists files and folders was run. Attackers do this to find documents, passwords and backups.
+author: NIHKOOL
+date: 2026-10-06
+tags:
+  - attack.discovery                   # MITRE tactic
+  - attack.t1083                       # MITRE technique -> shown as T1083
+logsource:
+  category: process_creation           # which events to look at
+detection:
+  search_programs:
+    process_file:
+      - tree.com
+      - findstr.exe
+      - where.exe
+      - forfiles.exe
+      - find
+      - locate
+  search_commands:
+    command_line|contains:
+      - 'dir /s'
+      - 'Get-ChildItem -Recurse'
+      - 'gci -r'
+  filter_it:
+    user: it-admin
+  condition: 1 of search_* and not filter_it
+falsepositives:                        # shown to the SOC analyst
+  - User or scripts searching for their own files
+  - Administrators checking a server
+level: low                          # informational, low, medium, high, critical
+details: "'{user}' searched for files on {hostname}: {command_line}"
