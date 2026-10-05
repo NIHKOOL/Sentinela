@@ -1,6 +1,11 @@
 # Sentinela
 
-See `README.md` for the project overview, architecture, and roadmap.
+Sentinela is a SOC training simulator: a virtual organization, simulated attacker steps, and a SOC console on top of a small SIEM (FastAPI + plain HTML/JS). See `README.md` for the overview, architecture, and roadmap.
+
+- Code lives in the `sentinela/` package; pages in `web/`. Start with `python start.py`; test with `python -m pytest`.
+- Attack scenarios must stay high-level and simulated: they only generate fake log events inside the app.
+- Render event data in the browser with `textContent` (the `S.el` helper), never `innerHTML`.
+- SOC-facing API responses must not expose ground truth (event `origin`, attack links).
 
 ## Session history
 
