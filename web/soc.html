@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinela SOC Console</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/static/logo-64.png">
+<link rel="apple-touch-icon" href="/static/logo-180.png">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .detail { position: sticky; top: 72px; }
+  @media (max-width: 1000px) { .detail { position: static; } }
+  .detail dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 10px; margin: 0; }
+  .detail dt { color: var(--muted); font-size: 12.5px; }
+  .detail dd { margin: 0; overflow-wrap: anywhere; }
+  .detail h3 { margin: 0 0 4px; font-size: 16px; }
+  .detail .section-title { font-size: 12.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin: 4px 0 -4px; }
+  .tips { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .filters input { width: 180px; }
+  .closed-row td { opacity: .6; }
+  .related { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+  .related-event { padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
+  .related-event:last-child { border-bottom: none; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">Sentinela <small>SOC Simulator</small></a>
+  <nav class="nav">
+    <a href="/">Overview</a>
+    <a href="/organization">Organization</a>
+    <a href="/soc" class="active">SOC</a>
+    <a href="/attacker">Attacker</a>
+  </nav>
+  <span class="chip"><span class="dot" id="webhook-dot"></span><span id="webhook-text">Discord</span></span>
+  <span class="chip"><span class="dot" id="status-dot"></span><span id="status-text">Connecting…</span></span>
+</header>
+
+<div class="page stack">
+  <div>
+    <h1>SOC Console</h1>
+    <p class="lead">You are the security analyst. Alerts appear when a detection rule matches. Some are real attacks, many are normal work that only <i>looks</i> suspicious. Open each alert, investigate, choose a verdict and close it.</p>
+  </div>
+
+  <div class="stats">
+    <div class="panel stat"><div class="label">Open alerts</div><div class="value" id="st-open">0</div></div>
+    <div class="panel stat"><div class="label">Critical</div><div class="value critical" id="st-critical">0</div></div>
+    <div class="panel stat"><div class="label">High</div><div class="value high" id="st-high">0</div></div>
+    <div class="panel stat"><div class="label">Medium / Low</div><div class="value" id="st-medlow">0</div></div>
+    <div class="panel stat"><div class="label">Events received</div><div class="value" id="st-events">0</div></div>
+  </div>
+
+  <div class="grid-main">
+    <div class="stack">
+      <section class="panel">
+        <h2>Alert queue
+          <select id="alert-filter" aria-label="Filter alerts">
+            <option value="open">Open</option>
+            <option value="new">New</option>
+            <option value="investigating">Investigating</option>
+            <option value="closed">Closed</option>
+            <option value="">All</option>
+          </select>
+        </h2>
+        <div class="table-wrap tall">
+          <table>
+            <thead><tr><th>#</th><th>Severity</th><th>Rule</th><th>Host</th><th>User</th><th>Events</th><th>First seen</th><th>Status</th></tr></thead>
+            <tbody id="alerts"></tbody>
+          </table>
+          <div class="empty hidden" id="alerts-empty">No alerts here. Quiet day… or is the attacker hiding?</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Event stream
+          <div class="filters">
+            <select id="host-filter" aria-label="Filter by host"><option value="">All hosts</option></select>
+            <input id="search" type="search" placeholder="Search events…" aria-label="Search events">
+            <button class="btn small" id="pause" type="button">Pause</button>
+          </div>
+        </h2>
+        <div class="table-wrap tall">
+          <table>
+            <thead><tr><th>Time</th><th>Host</th><th>Event</th><th>User</th><th>Details</th><th>Alerts</th></tr></thead>
+            <tbody id="events"></tbody>
+          </table>
+          <div class="empty hidden" id="events-empty">No events match.</div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel detail" id="detail">
+      <h2>Alert details</h2>
+      <div class="panel-body fields" id="detail-body">
+        <div class="empty">Select an alert in the queue to investigate it.</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+const { api, el, badge, severityBadge, toast, poll, formatTime, EVENT_LABELS, describeEvent } = S;
+const STATUS = { new: ["New", "info"], investigating: ["Investigating", "MEDIUM"], closed: ["Closed", ""] };
+const VERDICT = { true_positive: "True positive (real attack)", false_positive: "False positive (normal activity)" };
+const CRIT_KIND = { low: "", medium: "MEDIUM", high: "HIGH" };
+
+let rules = {};
+let assets = [];
+let selectedId = null;
+let streamPaused = false;
+
+const statusBadge = (status) => badge(...STATUS[status]);
+
+// --- Queue, stats and stream ---
+
+async function refresh() {
+  const filter = document.getElementById("alert-filter").value;
+  const [stats, alerts] = await Promise.all([api("/stats"), api(`/alerts${filter ? `?status=${filter}` : ""}`)]);
+
+  document.getElementById("st-open").textContent = stats.alerts_open;
+  document.getElementById("st-critical").textContent = stats.open_by_severity.CRITICAL;
+  document.getElementById("st-high").textContent = stats.open_by_severity.HIGH;
+  document.getElementById("st-medlow").textContent = stats.open_by_severity.MEDIUM + stats.open_by_severity.LOW;
+  document.getElementById("st-events").textContent = stats.events_total;
+
+  document.getElementById("alerts-empty").classList.toggle("hidden", alerts.length > 0);
+  document.getElementById("alerts").replaceChildren(...alerts.map((a) => el("tr", {
+    class: ["clickable", a.id === selectedId ? "selected" : "", a.status === "closed" ? "closed-row" : ""].join(" "),
+    onclick: () => select(a.id),
+  }, [
+    el("td", { class: "muted", text: a.id }),
+    el("td", {}, severityBadge(a.severity)),
+    el("td", {}, [el("code", { text: a.rule_id }), " ", a.rule_name]),
+    el("td", {}, [a.hostname, " ", a.asset_criticality === "high" ? badge("high-value", "HIGH") : null]),
+    el("td", { text: a.user }),
+    el("td", { text: a.count }),
+    el("td", { class: "muted", text: formatTime(a.first_seen) }),
+    el("td", {}, statusBadge(a.status)),
+  ])));
+
+  if (!streamPaused) await refreshEvents();
+}
+
+async function refreshEvents() {
+  const host = document.getElementById("host-filter").value;
+  const search = document.getElementById("search").value.trim();
+  const params = new URLSearchParams({ limit: "150" });
+  if (host) params.set("hostname", host);
+  if (search) params.set("search", search);
+  const events = await api(`/events?${params}`);
+
+  document.getElementById("events-empty").classList.toggle("hidden", events.length > 0);
+  document.getElementById("events").replaceChildren(...events.map((e) => el("tr", { class: e.alert_ids.length ? "alerted" : "" }, [
+    el("td", { class: "muted", text: formatTime(e.timestamp) }),
+    el("td", { text: e.hostname }),
+    el("td", { text: EVENT_LABELS[e.event_type] || e.event_type }),
+    el("td", { text: e.user }),
+    el("td", { class: "wrap" }, el("code", { text: describeEvent(e) })),
+    el("td", {}, e.alert_ids.map((id) => el("button", {
+      class: "btn small", type: "button", text: `#${id}`, onclick: () => select(id),
+    }))),
+  ])));
+}
+
+async function loadAssets() {
+  assets = await api("/assets");
+  const select = document.getElementById("host-filter");
+  const current = select.value;
+  select.replaceChildren(el("option", { value: "", text: "All hosts" }),
+    ...assets.map((a) => el("option", { value: a.hostname, text: a.hostname })));
+  select.value = current;
+}
+
+// --- Alert details and triage ---
+
+async function select(alertId) {
+  selectedId = alertId;
+  await renderDetail();
+  refresh();
+}
+
+function assetInfo(hostname) {
+  return assets.find((a) => a.hostname.toLowerCase() === hostname.toLowerCase());
+}
+
+async function renderDetail() {
+  const body = document.getElementById("detail-body");
+  if (selectedId === null) return;
+  let alert;
+  try { alert = await api(`/alerts/${selectedId}`); }
+  catch (e) { body.replaceChildren(el("div", { class: "empty", text: e.message })); return; }
+
+  const rule = rules[alert.rule_id] || {};
+  const asset = assetInfo(alert.hostname);
+  const closed = alert.status === "closed";
+
+  const notes = el("textarea", { id: "notes", placeholder: "What did you find? Why is it real or not?", maxlength: "2000" });
+  notes.value = alert.notes;
+
+  const verdictButtons = el("div", { class: "btn-row" }, [
+    el("button", { class: "btn good", type: "button", text: "False positive", title: "Normal activity, not an attack",
+      onclick: () => triage({ verdict: "false_positive", status: "closed", notes: notes.value }) }),
+    el("button", { class: "btn bad", type: "button", text: "True positive", title: "This is a real attack",
+      onclick: () => triage({ verdict: "true_positive", status: "closed", notes: notes.value }) }),
+  ]);
+
+  body.replaceChildren(
+    el("div", {}, [
+      el("div", { class: "btn-row" }, [severityBadge(alert.severity), statusBadge(alert.status), el("code", { text: `#${alert.id} · ${alert.rule_id}` })]),
+      el("h3", { text: alert.rule_name, style: "margin-top:8px" }),
+      el("div", { class: "muted", text: rule.description || "" }),
+    ]),
+    el("div", { text: alert.details }),
+    el("dl", {}, [
+      el("dt", { text: "Host" }), el("dd", {}, [alert.hostname, " ", asset ? badge(`${asset.criticality} criticality`, CRIT_KIND[asset.criticality]) : null]),
+      el("dt", { text: "Asset" }), el("dd", { text: asset ? `${asset.os} · ${asset.department} · ${asset.ip}` : "Not in organization" }),
+      el("dt", { text: "Known users" }), el("dd", { text: asset ? asset.users.join(", ") || "—" : "—" }),
+      el("dt", { text: "User" }), el("dd", { text: alert.user }),
+      el("dt", { text: "Source IP" }), el("dd", { text: alert.source_ip || "—" }),
+      el("dt", { text: "MITRE" }), el("dd", {}, el("code", { text: alert.mitre })),
+      el("dt", { text: "Seen" }), el("dd", { text: `${formatTime(alert.first_seen)} – ${formatTime(alert.last_seen)} (${alert.count} events)` }),
+    ]),
+    el("div", { class: "section-title", text: "Related events" }),
+    el("div", { class: "related" }, alert.events.map((e) => el("div", { class: "related-event" }, [
+      el("span", { class: "muted", text: formatTime(e.timestamp) }), " ",
+      el("b", { text: EVENT_LABELS[e.event_type] || e.event_type }), ` · ${e.user}`,
+      el("code", { class: "sub-line", text: describeEvent(e) }),
+    ]))),
+    el("div", { class: "section-title", text: "Investigate" }),
+    el("ul", { class: "tips" }, [
+      el("li", { text: "Is the user someone who normally works on this host (see Known users)?" }),
+      el("li", { text: "Does the source IP belong to the organization (10.x.x.x), or come from outside?" }),
+      el("li", { text: "Did other alerts fire on the same host around the same time?" }),
+    ]),
+    el("div", {}, el("button", { class: "btn small", type: "button", text: `Show all events from ${alert.hostname}`, onclick: () => {
+      document.getElementById("host-filter").value = alert.hostname;
+      document.getElementById("search").value = "";
+      refreshEvents();
+    } })),
+    el("div", { class: "section-title", text: "Verdict" }),
+    notes,
+    closed
+      ? el("div", { class: "fields" }, [
+          el("div", {}, ["Closed as ", el("b", { text: VERDICT[alert.verdict] }), "."]),
+          el("div", { class: "btn-row" }, [
+            el("button", { class: "btn", type: "button", text: "Save notes", onclick: () => triage({ notes: notes.value }) }),
+            el("button", { class: "btn", type: "button", text: "Reopen", onclick: () => triage({ status: "investigating" }) }),
+          ]),
+        ])
+      : el("div", { class: "fields" }, [
+          alert.status === "new"
+            ? el("div", {}, el("button", { class: "btn", type: "button", text: "Start investigating",
+                onclick: () => triage({ status: "investigating", notes: notes.value }) }))
+            : null,
+          el("div", { class: "muted", text: "Close the alert with your verdict:" }),
+          verdictButtons,
+        ]),
+  );
+}
+
+async function triage(update) {
+  try {
+    await api(`/alerts/${selectedId}`, { method: "PATCH", body: update });
+    if (update.status === "closed") toast(`Alert #${selectedId} closed. Check the Overview scoreboard to see if you were right.`);
+    await renderDetail();
+    refresh();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+// --- Controls ---
+
+document.getElementById("alert-filter").addEventListener("change", refresh);
+document.getElementById("host-filter").addEventListener("change", refreshEvents);
+let searchTimer;
+document.getElementById("search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(refreshEvents, 250);
+});
+document.getElementById("pause").addEventListener("click", (e) => {
+  streamPaused = !streamPaused;
+  e.target.textContent = streamPaused ? "Resume" : "Pause";
+  if (!streamPaused) refreshEvents();
+});
+
+(async () => {
+  const ruleList = await api("/rules");
+  rules = Object.fromEntries(ruleList.map((r) => [r.id, r]));
+  await loadAssets();
+  const linked = Number(new URLSearchParams(location.search).get("alert"));
+  if (linked) await select(linked);  // e.g. /soc?alert=6
+  poll(refresh, 2000);
+  setInterval(loadAssets, 15000);
+})();
+</script>
+</body>
+</html>

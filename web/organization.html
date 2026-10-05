@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinela Organization</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/logo-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/static/logo-64.png">
+<link rel="apple-touch-icon" href="/static/logo-180.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">Sentinela <small>SOC Simulator</small></a>
+  <nav class="nav">
+    <a href="/">Overview</a>
+    <a href="/organization" class="active">Organization</a>
+    <a href="/soc">SOC</a>
+    <a href="/attacker">Attacker</a>
+  </nav>
+  <span class="chip"><span class="dot" id="webhook-dot"></span><span id="webhook-text">Discord</span></span>
+  <span class="chip"><span class="dot" id="status-dot"></span><span id="status-text">Connecting…</span></span>
+</header>
+
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Organization</h1>
+      <p class="lead">The computers and servers in your company. They create normal activity all the time, and they are what the attacker targets and the SOC defends. Changes are saved automatically.</p>
+    </div>
+    <button class="btn" id="reset-sample" type="button">Reset to sample company</button>
+  </div>
+
+  <div class="grid-main">
+    <section class="panel">
+      <h2>Assets <span class="sub" id="asset-count"></span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Hostname</th><th>IP</th><th>Role / OS</th><th>Department</th><th>Criticality</th><th>Users</th><th>Alerts</th><th></th></tr>
+          </thead>
+          <tbody id="assets"></tbody>
+        </table>
+        <div class="empty hidden" id="assets-empty">No assets yet. Add one with the form, or reset to the sample company.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 id="form-title">Add a computer or server</h2>
+      <form class="panel-body fields" id="asset-form">
+        <div class="field-row">
+          <label>Hostname <input name="hostname" required maxlength="63" pattern="[A-Za-z0-9][A-Za-z0-9\-]*" placeholder="WS-ERIN" title="Letters, numbers and dashes"></label>
+          <label>IP address <input name="ip" required placeholder="10.0.1.15"></label>
+        </div>
+        <div class="field-row">
+          <label>Role
+            <select name="role">
+              <option value="workstation">Workstation (employee PC)</option>
+              <option value="server">Server (general)</option>
+              <option value="domain_controller">Domain controller</option>
+              <option value="web_server">Web server</option>
+              <option value="database">Database server</option>
+            </select>
+          </label>
+          <label>Operating system
+            <input name="os" required list="os-options" value="Windows 11">
+            <datalist id="os-options">
+              <option value="Windows 11"><option value="Windows 10"><option value="Windows Server 2022">
+              <option value="Windows Server 2019"><option value="Ubuntu 22.04"><option value="Debian 12">
+            </datalist>
+          </label>
+        </div>
+        <div class="field-row">
+          <label>Department <input name="department" required value="General" maxlength="60"></label>
+          <label>Criticality
+            <select name="criticality">
+              <option value="low">Low: one employee's PC</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High: business stops without it</option>
+            </select>
+          </label>
+        </div>
+        <label>Users (comma separated) <input name="users" placeholder="erin, it-admin"></label>
+        <div class="btn-row">
+          <button class="btn primary" type="submit" id="save-btn">Add asset</button>
+          <button class="btn hidden" type="button" id="cancel-edit">Cancel</button>
+        </div>
+        <div class="form-msg" id="form-msg" aria-live="polite"></div>
+      </form>
+    </section>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+const { api, el, badge, toast, poll } = S;
+const ROLE_LABELS = {
+  workstation: "Workstation", server: "Server", domain_controller: "Domain controller",
+  web_server: "Web server", database: "Database",
+};
+const CRIT_KIND = { low: "", medium: "MEDIUM", high: "HIGH" };
+const form = document.getElementById("asset-form");
+let editingId = null;
+let assets = [];
+
+async function refresh() {
+  const [list, stats] = await Promise.all([api("/assets"), api("/stats")]);
+  assets = list;
+  document.getElementById("asset-count").textContent = `${assets.length} assets`;
+  document.getElementById("assets-empty").classList.toggle("hidden", assets.length > 0);
+  document.getElementById("assets").replaceChildren(...assets.map((a) => {
+    const open = stats.open_by_host[a.hostname] || 0;
+    return el("tr", { class: a.id === editingId ? "selected" : "" }, [
+      el("td", {}, el("b", { text: a.hostname })),
+      el("td", {}, el("code", { text: a.ip })),
+      el("td", {}, [ROLE_LABELS[a.role], el("span", { class: "sub-line", text: a.os })]),
+      el("td", { text: a.department }),
+      el("td", {}, badge(a.criticality, CRIT_KIND[a.criticality])),
+      el("td", { class: "wrap", text: a.users.join(", ") || "—" }),
+      el("td", {}, open ? badge(String(open), "HIGH") : el("span", { class: "muted", text: "0" })),
+      el("td", {}, el("div", { class: "btn-row" }, [
+        el("button", { class: "btn small", type: "button", text: "Edit", onclick: () => startEdit(a) }),
+        el("button", { class: "btn small", type: "button", text: "Delete", onclick: () => remove(a) }),
+      ])),
+    ]);
+  }));
+}
+
+function message(text, kind) {
+  const node = document.getElementById("form-msg");
+  node.textContent = text;
+  node.className = `form-msg ${kind || ""}`;
+}
+
+function startEdit(asset) {
+  editingId = asset.id;
+  for (const name of ["hostname", "ip", "os", "role", "department", "criticality"]) form.elements[name].value = asset[name];
+  form.elements.users.value = asset.users.join(", ");
+  document.getElementById("form-title").textContent = `Edit ${asset.hostname}`;
+  document.getElementById("save-btn").textContent = "Save changes";
+  document.getElementById("cancel-edit").classList.remove("hidden");
+  message("");
+  refresh();
+}
+
+function stopEdit() {
+  editingId = null;
+  form.reset();
+  document.getElementById("form-title").textContent = "Add a computer or server";
+  document.getElementById("save-btn").textContent = "Add asset";
+  document.getElementById("cancel-edit").classList.add("hidden");
+  refresh();
+}
+
+async function remove(asset) {
+  if (!confirm(`Delete ${asset.hostname} from the organization?`)) return;
+  try {
+    await api(`/assets/${asset.id}`, { method: "DELETE" });
+    if (editingId === asset.id) stopEdit();
+    toast(`${asset.hostname} deleted`);
+    refresh();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(form));
+  body.users = body.users.split(",").map((u) => u.trim()).filter(Boolean);
+  try {
+    if (editingId) {
+      await api(`/assets/${editingId}`, { method: "PUT", body });
+      toast(`${body.hostname} saved`);
+      stopEdit();
+    } else {
+      await api("/assets", { method: "POST", body });
+      toast(`${body.hostname} added`);
+      form.reset();
+      refresh();
+    }
+    message("");
+  } catch (err) { message(err.message, "err"); }
+});
+
+document.getElementById("cancel-edit").addEventListener("click", stopEdit);
+
+document.getElementById("reset-sample").addEventListener("click", async () => {
+  if (!confirm("Replace all assets with the sample company?")) return;
+  await api("/assets/reset", { method: "POST" });
+  stopEdit();
+  toast("Sample company restored");
+});
+
+poll(refresh, 5000);
+</script>
+</body>
+</html>
