@@ -123,11 +123,11 @@ In `details`, correlations can also use `{count}` and `{timespan}`.
 
 ## Exercise: catch lateral movement
 
-The **Lateral movement** attack is not detected by any of the shipped rules. Create `sen-008-lateral-movement.yml`:
+The **Lateral movement** attack is not detected by any of the shipped rules. Create `sen-009-lateral-movement.yml`:
 
 ```yaml
 title: Admin logon from a non-IT workstation
-id: SEN-008
+id: SEN-009
 description: An admin account logged on from an internal machine that is not the IT workstation.
 tags:
   - attack.lateral_movement

@@ -2,7 +2,8 @@
 
 Most of it is harmless and triggers nothing. A few kinds (an admin running
 whoami, IT creating an account, a big upload to cloud storage) trigger rules
-on purpose. Those are false positives, and the SOC has to recognize them.
+on purpose, and so does a developer searching code. Those are false positives,
+and the SOC has to recognize them.
 """
 import random
 from datetime import datetime, timedelta
@@ -30,6 +31,12 @@ KINDS = [
     ("admin_discovery", 2),
     ("admin_account_created", 1),
     ("cloud_upload", 1),
+    ("developer_search", 2),
+]
+DEVELOPER_SEARCHES = [
+    ("C:\\Windows\\System32\\where.exe", "where python"),
+    ("C:\\Windows\\System32\\findstr.exe", "findstr /s /i TODO *.py"),
+    ("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "Get-ChildItem -Recurse -Filter *.log .\\build"),
 ]
 
 
@@ -139,6 +146,18 @@ def _cloud_upload(assets, rng, now):
                           bytes_out=rng.randint(55_000_000, 150_000_000))
 
 
+def _developer_search(assets, rng, now):
+    # A developer searching their own code and build output. Triggers SEN-008: a false positive.
+    workstations = _workstations(assets)
+    developers = [a for a in workstations if a.department.lower() == "engineering"] or workstations
+    if not developers:
+        return None
+    asset = rng.choice(developers)
+    process, command = rng.choice(DEVELOPER_SEARCHES)
+    return TelemetryEvent(timestamp=now, hostname=asset.hostname, event_type="process_creation",
+                          user=_regular_user(asset, rng), process_name=process, command_line=command)
+
+
 BUILDERS = {
     "logon": _logon,
     "process": _process,
@@ -147,4 +166,5 @@ BUILDERS = {
     "admin_discovery": _admin_discovery,
     "admin_account_created": _admin_account_created,
     "cloud_upload": _cloud_upload,
+    "developer_search": _developer_search,
 }

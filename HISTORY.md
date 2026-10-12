@@ -21,6 +21,33 @@ Entry template:
 
 ---
 
+## 2026-10-12 — SEN-008 hardened, File search attack, CSRF / DNS rebinding fix, skills section
+
+**Done**
+- Read the whole project. The committed SEN-008 (`5bb02a8`) had broken 2 tests that hard-coded SEN-001..007; fixed, and added SEN-008 tests (7 must-catch, 3 must-ignore).
+- Hardened SEN-008 against evasion: `dir /s` and `Get-ChildItem -Recurse` now use `contains|all` (catches `dir /b /s`, extra arguments in between), added `find.exe` (Windows). `filter_it` kept, with its risk (stolen it-admin account) noted in the rule.
+- `rules/README.md` lateral movement exercise renamed **SEN-009** (no clash with SEN-008); `tests/test_api.py` matches.
+- New attack scenario **File search** (T1083, `attacks.py`): Windows `dir /s`, `findstr /si password`, `Get-ChildItem -Recurse -Include *.kdbx,*.pfx`; Linux `find` + `grep` (grep is not detected: a deliberate small gap). Added to the attack chain on the Attacker page.
+- New background activity **developer_search** (weight 2, Engineering workstation): `where python`, `findstr /s TODO`, `Get-ChildItem -Recurse` → SEN-008 false positives to triage.
+- Measured one simulated hour: SEN-008 57 matching events → 2 alerts (grouping); SEN-007 is the noisiest (22 HIGH false positives/hour).
+- **Security fix** (`api.py`): state-changing requests with a foreign `Origin` / `Sec-Fetch-Site: cross-site` get 403 (CSRF); `TrustedHostMiddleware` allows only `127.0.0.1` / `localhost` (DNS rebinding), configurable with `SENTINELA_ALLOWED_HOSTS`. Requests without `Origin` (agents, curl) still work. Tests use `base_url=http://127.0.0.1:8000`.
+- `start.py`: Uvicorn access log off, so the terminal shows alerts only.
+- README: File search in features/rules table, security note, troubleshooting row, roadmap, and a new **Skills Demonstrated** section (SOC analysis, detection engineering, secure development) as portfolio evidence.
+- Verified live (port 8765): File search on DB01 → SEN-008 (3 events, 1 alert); forged cross-site reset → 403; rebinding Host → 400; agent ingest → 200. Tests: 163 passing.
+- SOC topics taught: process creation telemetry (4688 / Sysmon 1) and the command line as evidence; Windows event IDs 4624/4625/4720; T1083 and what attackers search for (kdbx, pfx, configs); TP vs FP by context; evasion of exact string matches; tuning trade-offs; alert grouping and alert fatigue.
+
+**Decisions**
+- SEN-008 keeps the `it-admin` filter; the blind spot is documented instead of removed (the user's tuning choice).
+- Same-origin check compares `Origin` with the `Host` header, so both `127.0.0.1:8000` and `localhost:8000` work. GET requests are not checked (other sites cannot read responses without CORS headers).
+
+**Next** (in this order)
+1. User commits this session's work (not committed yet).
+2. **Tuning exercise for the user:** cut SEN-007's false positives (e.g. a filter for the cloud storage range `198.51.100.0/24`), then check that real exfiltration to `203.0.113.x` is still caught.
+3. **Detection exercises for the user:** SEN-009 lateral movement (guide in `rules/README.md`); a rule for `grep -ri password` on Linux to close the File search gap; password spraying with `value_count`.
+4. **SQLite storage** for events, alerts, attacks and triage, so games survive restarts. Then search/investigation (timeline per host/user), then a real Windows agent.
+
+---
+
 ## 2026-10-06 — Logo, Discord, README install guide, YAML (Sigma-style) rules
 
 **Done**

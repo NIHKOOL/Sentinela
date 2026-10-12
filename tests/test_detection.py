@@ -97,7 +97,7 @@ def test_large_upload_to_internet(dest_ip, bytes_out, expected):
 
 def test_shipped_rules_load_without_errors():
     assert RULESET.errors == []
-    assert [meta.id for meta in RULESET.alerting] == [f"SEN-00{n}" for n in range(1, 8)]
+    assert [meta.id for meta in RULESET.alerting] == [f"SEN-00{n}" for n in range(1, 9)]
 
 
 def test_building_block_rules_do_not_alert_by_themselves():
@@ -125,3 +125,30 @@ def test_alert_details_are_filled_in():
 
 def test_timestamp_without_timezone_is_utc():
     assert event(timestamp="2026-10-05T10:00:00").timestamp.tzinfo is not None
+
+
+# --- SEN-008: file and directory discovery ---
+
+@pytest.mark.parametrize("process_name,command_line", [
+    (r"C:\Windows\System32\cmd.exe", r"cmd.exe /c dir /s /b C:\Users\*.docx"),
+    (r"C:\Windows\System32\cmd.exe", r"dir /b /s C:\Shares"),                  # flags in another order
+    (r"C:\Windows\System32\findstr.exe", "findstr /si password *.txt *.config"),
+    (r"C:\Windows\System32\find.exe", 'find /i "password" notes.txt'),
+    (r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+     r"Get-ChildItem -Path C:\Shares -Recurse -Include *.kdbx"),               # extra arguments in between
+    (r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "gci -r -fi *.pfx"),
+    ("/usr/bin/find", "find / -name *.kdbx"),
+])
+def test_file_discovery_is_detected(process_name, command_line):
+    e = event(user="bob", process_name=process_name, command_line=command_line)
+    assert rule_ids(Detector(RULESET).evaluate(1, e)) == ["SEN-008"]
+
+
+@pytest.mark.parametrize("user,process_name,command_line", [
+    ("bob", "excel.exe", "excel.exe report.xlsx"),
+    ("bob", r"C:\Windows\System32\cmd.exe", "dir"),                            # one folder, not a search
+    ("it-admin", r"C:\Windows\System32\findstr.exe", "findstr /s error *.log"),  # filtered: IT at work
+])
+def test_file_discovery_ignores_normal_work(user, process_name, command_line):
+    e = event(user=user, process_name=process_name, command_line=command_line)
+    assert Detector(RULESET).evaluate(1, e) == []

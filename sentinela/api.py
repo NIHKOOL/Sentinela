@@ -4,11 +4,13 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .alerting import DiscordNotifier
 from .attacks import SCENARIOS
@@ -24,6 +26,10 @@ PAGES = {
     "/soc": "soc.html",
     "/attacker": "attacker.html",
 }
+
+# Host names the server answers to. Anything else (e.g. a DNS rebinding attack) gets 400.
+LOCAL_HOSTS = ["127.0.0.1", "localhost"]
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 router = APIRouter(prefix="/api/v1")
 
@@ -217,6 +223,16 @@ def _load_and_report(rules_dir: Path) -> RuleSet:
     return ruleset
 
 
+def _is_cross_site(request: Request) -> bool:
+    """True if a browser sent this request from another website (cross-site request forgery)."""
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        return True
+    origin = request.headers.get("origin")
+    if origin is None:
+        return False  # not sent by a web page: curl, scripts and real agents
+    return urlsplit(origin).netloc.lower() != request.headers.get("host", "").lower()
+
+
 def _page(filename: str):
     def serve():
         return FileResponse(WEB_DIR / filename)
@@ -224,7 +240,8 @@ def _page(filename: str):
 
 
 def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict], None]] = None,
-               seed: Optional[int] = None, rules_dir: Path = DEFAULT_RULES_DIR) -> FastAPI:
+               seed: Optional[int] = None, rules_dir: Path = DEFAULT_RULES_DIR,
+               allowed_hosts: Optional[list[str]] = None) -> FastAPI:
     """Build the app. Without `data_dir` the organization is kept in memory only (used by tests)."""
     app = FastAPI(title="Sentinela SOC Simulator", version="0.3.0", lifespan=lifespan)
     organization = Organization(data_dir / "organization.json" if data_dir else None)
@@ -237,6 +254,15 @@ def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict]
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     for path, filename in PAGES.items():
         app.add_api_route(path, _page(filename), methods=["GET"], include_in_schema=False)
+
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or LOCAL_HOSTS)
+
+    @app.middleware("http")
+    async def block_cross_site_changes(request: Request, call_next):
+        # Another website must not be able to reset the game or change data through the user's browser
+        if request.method not in SAFE_METHODS and _is_cross_site(request):
+            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        return await call_next(request)
 
     @app.middleware("http")
     async def always_check_for_updates(request: Request, call_next):
@@ -262,5 +288,6 @@ load_dotenv()
 app = create_app(
     data_dir=Path(os.getenv("SENTINELA_DATA_DIR", "data")),
     rules_dir=Path(os.getenv("SENTINELA_RULES_DIR", DEFAULT_RULES_DIR)),
+    allowed_hosts=[h.strip() for h in os.getenv("SENTINELA_ALLOWED_HOSTS", "").split(",") if h.strip()] or None,
     notify=DiscordNotifier(os.getenv("DISCORD_WEBHOOK_URL", ""), os.getenv("DISCORD_MIN_SEVERITY", "HIGH")),
 )

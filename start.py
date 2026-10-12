@@ -12,7 +12,7 @@ def main():
     url = f"http://{HOST}:{PORT}"
     print(f"Sentinela SOC Simulator: {url}  (press Ctrl+C to stop)")
     threading.Timer(1.5, webbrowser.open, args=[url]).start()
-    uvicorn.run("sentinela.api:app", host=HOST, port=PORT)
+    uvicorn.run("sentinela.api:app", host=HOST, port=PORT, access_log=False)  # keep the terminal for alerts
 
 
 if __name__ == "__main__":

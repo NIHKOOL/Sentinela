@@ -4,10 +4,17 @@ from fastapi.testclient import TestClient
 from sentinela.api import create_app
 
 
+BASE_URL = "http://127.0.0.1:8000"
+
+
+def make_client(**kwargs) -> TestClient:
+    # No `with` block, so the background activity loop does not run during tests
+    return TestClient(create_app(**kwargs), base_url=BASE_URL)
+
+
 @pytest.fixture
 def client(tmp_path):
-    # No `with` block, so the background activity loop does not run during tests
-    return TestClient(create_app(data_dir=tmp_path, seed=1))
+    return make_client(data_dir=tmp_path, seed=1)
 
 
 def asset_id(client, hostname):
@@ -46,7 +53,7 @@ def test_add_edit_delete_asset_and_persist(client, tmp_path):
     assert updated.json()["department"] == "Legal"
 
     # Survives a restart
-    restarted = TestClient(create_app(data_dir=tmp_path))
+    restarted = make_client(data_dir=tmp_path)
     assert any(a["hostname"] == "WS-ERIN" for a in restarted.get("/api/v1/assets").json())
 
     assert client.delete(f"/api/v1/assets/{new_id}").status_code == 204
@@ -129,7 +136,7 @@ def test_simulation_settings_and_reset(client):
 
 LATERAL_MOVEMENT_RULE = """
 title: Admin logon from a non-IT workstation
-id: SEN-008
+id: SEN-009
 level: high
 tags: [attack.lateral_movement, attack.t1021]
 logsource:
@@ -148,7 +155,7 @@ detection:
 def test_rules_endpoint_lists_shipped_rules(client):
     data = client.get("/api/v1/rules").json()
     assert data["errors"] == []
-    assert [r["id"] for r in data["rules"]] == [f"SEN-00{n}" for n in range(1, 8)]
+    assert [r["id"] for r in data["rules"]] == [f"SEN-00{n}" for n in range(1, 9)]
     brute_force = data["rules"][2]
     assert brute_force["type"] == "event_count"
     assert brute_force["file"].startswith("sen-003-brute-force.yml")
@@ -158,7 +165,7 @@ def test_rules_endpoint_lists_shipped_rules(client):
 def test_reload_picks_up_new_and_broken_rules(tmp_path):
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
-    client = TestClient(create_app(seed=1, rules_dir=rules_dir))
+    client = make_client(seed=1, rules_dir=rules_dir)
     assert client.get("/api/v1/rules").json()["rules"] == []
 
     # The lateral movement gap is not detected without a rule...
@@ -166,10 +173,47 @@ def test_reload_picks_up_new_and_broken_rules(tmp_path):
     assert client.post("/api/v1/attacks", json=attack).json()["detected"] is False
 
     # ...add the rule plus a broken file, reload, and it is
-    (rules_dir / "sen-008-lateral-movement.yml").write_text(LATERAL_MOVEMENT_RULE, encoding="utf-8")
+    (rules_dir / "sen-009-lateral-movement.yml").write_text(LATERAL_MOVEMENT_RULE, encoding="utf-8")
     (rules_dir / "broken.yml").write_text("title: [oops", encoding="utf-8")
     data = client.post("/api/v1/rules/reload").json()
-    assert [r["id"] for r in data["rules"]] == ["SEN-008"]
+    assert [r["id"] for r in data["rules"]] == ["SEN-009"]
     assert len(data["errors"]) == 1 and "broken.yml" in data["errors"][0]
 
-    assert client.post("/api/v1/attacks", json=attack).json()["detected_by"] == ["SEN-008"]
+    assert client.post("/api/v1/attacks", json=attack).json()["detected_by"] == ["SEN-009"]
+
+
+# --- Request checks (CSRF, DNS rebinding) ---
+
+@pytest.mark.parametrize("headers", [
+    {"Origin": "https://evil.example"},
+    {"Origin": "http://localhost:3000"},       # another app on this computer
+    {"Origin": "null"},                         # sandboxed page or local file
+    {"Sec-Fetch-Site": "cross-site"},
+])
+@pytest.mark.parametrize("path", ["/api/v1/simulation/reset", "/api/v1/assets/reset", "/api/v1/rules/reload"])
+def test_cross_site_changes_are_blocked(client, path, headers):
+    assert client.post(path, headers=headers).status_code == 403
+
+
+def test_same_site_page_and_agents_can_change_things(client):
+    # The Sentinela pages themselves (same origin), and agents/scripts without an Origin header
+    assert client.post("/api/v1/simulation/reset", headers={"Origin": BASE_URL, "Sec-Fetch-Site": "same-origin"}).status_code == 200
+    assert client.post("/api/v1/ingest", json={"hostname": "WS-BOB", "event_type": "process_creation",
+                                               "user": "bob"}).status_code == 200
+
+
+def test_cross_site_reads_are_not_blocked_by_this_check(client):
+    # Reading is protected by the browser itself: other sites cannot see the response (no CORS headers)
+    assert client.get("/api/v1/stats", headers={"Origin": "https://evil.example"}).status_code == 200
+    assert "access-control-allow-origin" not in client.get("/api/v1/stats", headers={"Origin": "https://evil.example"}).headers
+
+
+@pytest.mark.parametrize("host", ["evil.example", "rebind.attacker.test:8000"])
+def test_unknown_host_header_is_rejected(client, host):
+    assert client.get("/api/v1/stats", headers={"Host": host}).status_code == 400
+
+
+def test_allowed_hosts_can_be_configured(tmp_path):
+    client = TestClient(create_app(data_dir=tmp_path, allowed_hosts=["sentinela.lab"]), base_url="http://sentinela.lab")
+    assert client.get("/health").status_code == 200
+    assert client.get("/health", headers={"Host": "127.0.0.1"}).status_code == 400

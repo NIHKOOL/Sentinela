@@ -36,6 +36,8 @@ SCENARIOS = {s.id: s for s in [
              supports_success=True),
     Scenario("discovery", "Discovery", "Discovery", "T1033 / T1087",
              "After getting in, look around: which user am I, which accounts and groups exist."),
+    Scenario("file_search", "File search", "Discovery", "T1083",
+             "Search the target's disks for valuable files: passwords, password databases, keys and documents."),
     Scenario("credential_theft", "Credential theft", "Credential Access", "T1003",
              "Run a (simulated) tool that steals saved passwords from the target's memory."),
     Scenario("backdoor_account", "Create backdoor account", "Persistence", "T1136",
@@ -94,6 +96,23 @@ def _discovery(target, source, succeed, rng, now):
     ]
 
 
+def _file_search(target, source, succeed, rng, now):
+    user = _compromised_user(target)
+    if is_linux(target):
+        steps = [("/usr/bin/find", "find / -name *.kdbx -o -name id_rsa"),
+                 ("/usr/bin/grep", "grep -ri password /etc /var/www")]   # grep: no default rule, a small gap
+    else:
+        powershell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        steps = [("C:\\Windows\\System32\\cmd.exe", "cmd.exe /c dir /s /b C:\\Users\\*.docx C:\\Users\\*.xlsx"),
+                 ("C:\\Windows\\System32\\findstr.exe", "findstr /si password *.txt *.xml *.config"),
+                 (powershell, "Get-ChildItem -Path C:\\ -Recurse -Include *.kdbx,*.pfx")]
+    return [
+        TelemetryEvent(timestamp=now - timedelta(seconds=4 * (len(steps) - i)), hostname=target.hostname,
+                       event_type="process_creation", user=user, process_name=process, command_line=command)
+        for i, (process, command) in enumerate(steps)
+    ]
+
+
 def _credential_theft(target, source, succeed, rng, now):
     process = "/tmp/credential_dumper" if is_linux(target) else "C:\\Users\\Public\\credential_dumper.exe"
     return [TelemetryEvent(timestamp=now, hostname=target.hostname, event_type="process_creation",
@@ -121,6 +140,7 @@ def _exfiltration(target, source, succeed, rng, now):
 BUILDERS = {
     "password_guessing": _password_guessing,
     "discovery": _discovery,
+    "file_search": _file_search,
     "credential_theft": _credential_theft,
     "backdoor_account": _backdoor_account,
     "lateral_movement": _lateral_movement,

@@ -3,7 +3,7 @@ import random
 import pytest
 
 from sentinela import activity, attacks
-from sentinela.models import AlertUpdate, AttackRequest, TelemetryEvent
+from sentinela.models import AlertUpdate, AttackRequest, TelemetryEvent, utc_now
 from sentinela.organization import Organization
 from sentinela.simulation import Simulation
 
@@ -33,6 +33,7 @@ def attack(sim, scenario, target, source=None, succeed=False):
 
 @pytest.mark.parametrize("scenario,expected_rules", [
     ("discovery", ["SEN-001"]),
+    ("file_search", ["SEN-008"]),
     ("credential_theft", ["SEN-005"]),
     ("backdoor_account", ["SEN-006"]),
     ("exfiltration", ["SEN-007"]),
@@ -47,6 +48,14 @@ def test_password_guessing_with_success_triggers_brute_force_and_critical(sim):
     result = attack(sim, "password_guessing", "DC01", succeed=True)
     assert result["succeeded"]
     assert set(result["detected_by"]) == {"SEN-002", "SEN-003", "SEN-004"}
+
+
+def test_file_search_on_linux_is_only_partly_detected(sim):
+    # find is caught, grep is not: a small gap to close with a new rule
+    result = attack(sim, "file_search", "WEB01")
+    assert result["detected_by"] == ["SEN-008"]
+    [alert] = [a for a in sim.list_alerts() if a["rule_id"] == "SEN-008"]
+    assert alert["count"] == 1 and len(result["event_ids"]) == 2
 
 
 def test_lateral_movement_is_a_detection_gap(sim):
@@ -157,3 +166,11 @@ def test_background_activity_is_mostly_quiet(sim):
 
 def test_background_activity_with_no_assets():
     assert activity.generate([], random.Random(0)) == []
+
+
+def test_developer_search_is_a_false_positive_for_sen_008(sim):
+    developer = activity.BUILDERS["developer_search"](sim.org.all(), random.Random(0), utc_now())
+    assert developer.hostname == "WS-DAVE"   # the Engineering workstation
+    stored = sim.ingest(developer, origin="background")
+    assert [sim.get_alert(a)["rule_id"] for a in stored["alert_ids"]] == ["SEN-008"]
+    assert sim.score()["attacks_launched"] == 0

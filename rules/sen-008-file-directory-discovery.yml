@@ -4,6 +4,7 @@ status: experimental
 description: A command that searches or lists files and folders was run. Attackers do this to find documents, passwords and backups.
 author: NIHKOOL
 date: 2026-10-06
+modified: 2026-10-12
 tags:
   - attack.discovery                   # MITRE tactic
   - attack.t1083                       # MITRE technique -> shown as T1083
@@ -11,23 +12,31 @@ logsource:
   category: process_creation           # which events to look at
 detection:
   search_programs:
-    process_file:
+    process_file:                      # file name only, lowercase, with .exe on Windows
       - tree.com
       - findstr.exe
       - where.exe
       - forfiles.exe
-      - find
+      - find.exe                       # Windows
+      - find                           # Linux
       - locate
-  search_commands:
-    command_line|contains:
-      - 'dir /s'
-      - 'Get-ChildItem -Recurse'
-      - 'gci -r'
+  search_cmd_dir:                      # "dir /s", "dir /b /s", "dir C:\ /s" ...
+    command_line|contains|all:
+      - 'dir '
+      - '/s'
+  search_powershell:                   # the pieces in any order, so extra arguments do not hide it
+    - command_line|contains|all:
+        - 'Get-ChildItem'
+        - '-Recurse'
+    - command_line|contains|all:
+        - 'gci '
+        - '-r'
   filter_it:
-    user: it-admin
+    user: it-admin                     # known risk: a stolen it-admin account is not detected
   condition: 1 of search_* and not filter_it
 falsepositives:                        # shown to the SOC analyst
   - User or scripts searching for their own files
+  - Developers searching source code (findstr, where, Get-ChildItem -Recurse)
   - Administrators checking a server
 level: low                          # informational, low, medium, high, critical
 details: "'{user}' searched for files on {hostname}: {command_line}"
