@@ -155,7 +155,7 @@ detection:
 def test_rules_endpoint_lists_shipped_rules(client):
     data = client.get("/api/v1/rules").json()
     assert data["errors"] == []
-    assert [r["id"] for r in data["rules"]] == [f"SEN-00{n}" for n in range(1, 9)]
+    assert [r["id"] for r in data["rules"]] == [f"SEN-00{n}" for n in range(1, 10)]
     brute_force = data["rules"][2]
     assert brute_force["type"] == "event_count"
     assert brute_force["file"].startswith("sen-003-brute-force.yml")

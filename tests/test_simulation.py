@@ -58,8 +58,14 @@ def test_file_search_on_linux_is_only_partly_detected(sim):
     assert alert["count"] == 1 and len(result["event_ids"]) == 2
 
 
-def test_lateral_movement_is_a_detection_gap(sim):
-    result = attack(sim, "lateral_movement", "DB01", source="WS-BOB")
+@pytest.mark.parametrize("source", ["WS-BOB", "DC01", "WEB01"])
+def test_lateral_movement_is_detected(sim, source):
+    assert attack(sim, "lateral_movement", "DB01", source=source)["detected_by"] == ["SEN-009"]
+
+
+def test_lateral_movement_from_the_it_workstation_is_a_blind_spot(sim):
+    # SEN-009 trusts WS-IT01, so an attacker who controls it is not noticed
+    result = attack(sim, "lateral_movement", "DB01", source="WS-IT01")
     assert not result["detected"]
     assert sim.score()["missed_attacks"][0]["scenario"] == "lateral_movement"
 

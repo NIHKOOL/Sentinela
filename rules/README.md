@@ -123,7 +123,7 @@ In `details`, correlations can also use `{count}` and `{timespan}`.
 
 ## Exercise: catch lateral movement
 
-The **Lateral movement** attack is not detected by any of the shipped rules. Create `sen-009-lateral-movement.yml`:
+The **Lateral movement** attack was not detected by the original rules. This exercise is now solved and shipped as [`sen-009-lateral-movement.yml`](sen-009-lateral-movement.yml); this is the starting version:
 
 ```yaml
 title: Admin logon from a non-IT workstation
@@ -148,9 +148,11 @@ level: high
 details: "'{user}' logged on to {hostname} from {source_ip}, which is not an IT workstation."
 ```
 
-Then click **Reload rules**, launch **Lateral movement** on the Attacker page, and watch "Not detected" turn into "Detected".
+Then click **Reload rules**, launch **Lateral movement** on the Attacker page, and watch "Not detected" turn into "Detected". Try it from WS-IT01 too: the exclusion makes that a blind spot.
 
 **More ideas to try:**
+* **Close the Linux file search gap (SEN-010):** catch `grep -ri password` (look at `process_file` and `command_line|contains|all`).
+* **Tune SEN-007:** filter out the cloud storage range `198.51.100.0/24`, and check that exfiltration to `203.0.113.x` is still caught.
 * **Password spraying:** use `value_count` to catch one source IP failing logons for many different users.
 * **Tuning:** remove SEN-001's false positives from `it-admin` with a filter, then check whether you would still catch a real attacker.
 

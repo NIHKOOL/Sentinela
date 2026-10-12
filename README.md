@@ -141,7 +141,7 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 * Repeated matches of the same rule for the same host, user and source are **grouped** into one alert, like a real SIEM.
 * The simulation remembers which events came from the attacker (**ground truth**), but the SOC views never show it. The score compares your verdicts with the truth.
 * Some normal activity triggers rules on purpose (an admin running `whoami`, IT creating an account, a big upload to cloud storage, a developer searching code), so the SOC must learn to tell false positives apart.
-* Not every attack step has a rule: **lateral movement goes undetected** by default, and on Linux the file search's `grep` is missed. Finding and closing gaps like this is the job of detection engineering.
+* Every rule has blind spots: lateral movement **from the IT workstation** (WS-IT01) is not detected, and on Linux the file search's `grep` is missed. Finding and closing gaps like this is the job of detection engineering.
 * The web API only accepts changes from its own pages (requests from other websites get `403`, against CSRF) and only answers to `127.0.0.1` / `localhost` (against DNS rebinding). Agents and scripts that send no `Origin` header, like a real agent posting to `/api/v1/ingest`, are not affected.
 
 ### Detection rules · [MITRE ATT&CK documentation](https://attack.mitre.org/)
@@ -156,8 +156,9 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 | SEN-006 | Medium | New user account created | [T1136](https://attack.mitre.org/techniques/T1136/) |
 | SEN-007 | High | 50 MB+ upload to an external IP | [T1048](https://attack.mitre.org/techniques/T1048/) |
 | SEN-008 | Low | File and folder searches (`dir /s`, `findstr`, `Get-ChildItem -Recurse`, `find`) | [T1083](https://attack.mitre.org/techniques/T1083/) |
+| SEN-009 | High | Lateral movement: admin logon from an internal machine that is not the IT workstation | [T1021](https://attack.mitre.org/techniques/T1021/) |
 
-Each rule is a file in [`rules/`](rules/). See **[rules/README.md](rules/README.md)** for how to write your own: fields, modifiers, conditions, correlation rules, and an exercise to catch lateral movement.
+Each rule is a file in [`rules/`](rules/). See **[rules/README.md](rules/README.md)** for how to write your own: fields, modifiers, conditions, correlation rules, and exercises.
 
 ---
 
@@ -173,7 +174,7 @@ What I learned and practiced while building Sentinela, with where to find the ev
 | **Reading endpoint telemetry** | Process creation events (in real environments: Windows Security **4688** / Sysmon **Event ID 1**), where the **command line** is the key evidence; logon success/failure (**4624 / 4625**); account creation (**4720**); outbound network connections with byte counts. |
 | **Following an attack through the kill chain** | Brute force → logon → discovery → file search → credential theft → backdoor account → lateral movement → exfiltration, each step mapped to [MITRE ATT&CK](https://attack.mitre.org/) (T1110, T1078, T1033/T1087, T1083, T1003, T1136, T1021, T1048). |
 | **Alert fatigue and grouping** | Measured over one simulated hour: SEN-008 matched **57 events** but produced only **2 alerts**, because repeats for the same host and user are grouped. SEN-007 produced **22 false positives per hour at HIGH severity**: a rule that needs tuning before analysts learn to ignore it. |
-| **Finding detection gaps** | Lateral movement is never detected by the shipped rules, and on Linux the file search's `grep` is missed. Knowing what the SIEM *cannot* see matters as much as the alerts it raises. |
+| **Finding detection gaps** | Lateral movement was invisible to the original rules until I wrote SEN-009. Its remaining blind spot is an attacker on the trusted IT workstation; on Linux the file search's `grep` is still missed. Knowing what the SIEM *cannot* see matters as much as the alerts it raises. |
 
 ### Detection engineering
 
@@ -183,6 +184,7 @@ What I learned and practiced while building Sentinela, with where to find the ev
 | **Making a rule hard to evade** | Changed exact-text matches like `contains: 'dir /s'` (beaten by `dir /b /s`) to `contains\|all` on the separate pieces, so a different argument order or extra arguments in between still match. Added `find.exe`, because field values must match exactly what the log contains. |
 | **Tuning and its risks** | The `filter_it` exclusion removes noise from the IT admin, but a stolen `it-admin` account would then search unnoticed. This known risk is documented in the rule rather than hidden. |
 | **Testing rules like code** | Every rule has pytest cases for what it **must** catch and what it **must not** catch ([`tests/test_detection.py`](tests/test_detection.py)). Changing a rule without updating its tests fails the build. |
+| **Closing a detection gap** | [`rules/sen-009-lateral-movement.yml`](rules/sen-009-lateral-movement.yml): my rule for **T1021 lateral movement**: an `administrator`/`root` logon from an internal IP that is not the IT workstation. Tested against the attack from 4 source machines (3 detected, the IT workstation is the documented blind spot) and **0 false positives** in 1,200 ticks of normal activity. |
 | **Correlation rules** | Brute force (5 failures from one source in 60 s, SEN-003) and "successful logon after brute force" (SEN-004), built on building-block rules. |
 | **Simulating realistic noise** | Added a harmless look-alike (a developer running `findstr /s TODO *.py` and `where python`) so SEN-008 has false positives to triage, as in a real company. |
 
@@ -192,7 +194,7 @@ What I learned and practiced while building Sentinela, with where to find the ev
 * **Untrusted data handling:** log data is shown with `textContent`, never `innerHTML` (no XSS from a crafted event), and rules are loaded with `yaml.safe_load` only.
 * **Web security fixes:** blocked cross-site requests to state-changing endpoints (**CSRF**) and unknown `Host` headers (**DNS rebinding**), with tests for both.
 * **Separation of ground truth:** the SOC API never reveals which events came from the attacker, so triage is a fair test.
-* **Test-driven changes:** 163 automated tests (`python -m pytest`).
+* **Test-driven changes:** 173 automated tests (`python -m pytest`).
 
 ---
 
@@ -243,7 +245,7 @@ Sentinela/
 - [x] File search attack (T1083) and my own detection rule SEN-008, with true and false positives to triage
 - [x] Protection against cross-site requests (CSRF) and DNS rebinding
 - [ ] Tune the noisiest rule (SEN-007: allowlist known cloud storage)
-- [ ] A rule that catches lateral movement
+- [x] A rule that catches lateral movement (SEN-009)
 - [ ] Save events and alerts in SQLite so a game survives restarts
 - [ ] Real Windows agent that sends Event Log data to `/api/v1/ingest`
 

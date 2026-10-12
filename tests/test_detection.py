@@ -97,7 +97,7 @@ def test_large_upload_to_internet(dest_ip, bytes_out, expected):
 
 def test_shipped_rules_load_without_errors():
     assert RULESET.errors == []
-    assert [meta.id for meta in RULESET.alerting] == [f"SEN-00{n}" for n in range(1, 9)]
+    assert [meta.id for meta in RULESET.alerting] == [f"SEN-00{n}" for n in range(1, 10)]
 
 
 def test_building_block_rules_do_not_alert_by_themselves():
@@ -151,4 +151,27 @@ def test_file_discovery_is_detected(process_name, command_line):
 ])
 def test_file_discovery_ignores_normal_work(user, process_name, command_line):
     e = event(user=user, process_name=process_name, command_line=command_line)
+    assert Detector(RULESET).evaluate(1, e) == []
+
+
+# --- SEN-009: lateral movement (admin logon from a non-IT workstation) ---
+
+@pytest.mark.parametrize("user,source_ip", [
+    ("administrator", "10.0.0.10"),   # from DC01 to another server
+    ("Administrator", "10.0.1.12"),   # from a normal workstation
+    ("root", "10.0.0.30"),
+])
+def test_admin_logon_from_non_it_machine_is_detected(user, source_ip):
+    e = event(hostname="DB01", event_type="authentication_success", user=user, source_ip=source_ip)
+    assert rule_ids(Detector(RULESET).evaluate(1, e)) == ["SEN-009"]
+
+
+@pytest.mark.parametrize("user,source_ip", [
+    ("administrator", "10.0.1.20"),   # from WS-IT01, where admins work
+    ("alice", "10.0.1.11"),           # a normal user
+    ("administrator", "203.0.113.5"), # from the internet: SEN-004's job, not lateral movement
+    ("administrator", None),          # unknown source
+])
+def test_lateral_movement_rule_ignores_other_logons(user, source_ip):
+    e = event(hostname="DB01", event_type="authentication_success", user=user, source_ip=source_ip)
     assert Detector(RULESET).evaluate(1, e) == []

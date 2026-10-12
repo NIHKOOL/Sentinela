@@ -21,7 +21,7 @@ Entry template:
 
 ---
 
-## 2026-10-12 — SEN-008 hardened, File search attack, CSRF / DNS rebinding fix, skills section
+## 2026-10-12 — SEN-008 hardened, File search attack, CSRF / DNS rebinding fix, skills section, SEN-009
 
 **Done**
 - Read the whole project. The committed SEN-008 (`5bb02a8`) had broken 2 tests that hard-coded SEN-001..007; fixed, and added SEN-008 tests (7 must-catch, 3 must-ignore).
@@ -34,6 +34,9 @@ Entry template:
 - `start.py`: Uvicorn access log off, so the terminal shows alerts only.
 - README: File search in features/rules table, security note, troubleshooting row, roadmap, and a new **Skills Demonstrated** section (SOC analysis, detection engineering, secure development) as portfolio evidence.
 - Verified live (port 8765): File search on DB01 → SEN-008 (3 events, 1 alert); forged cross-site reset → 403; rebinding Host → 400; agent ingest → 200. Tests: 163 passing.
+- Committed by the user: `1a5caca` (everything above).
+- **SEN-009 lateral movement** (the user's exercise, `rules/sen-009-lateral-movement.yml`). Review found: `condition: selective` typo (rule silently skipped by the loader), file misnamed `sen-009-grep-ri-password.yml`, SEN-008 accidentally renamed to `... copy.yml`, title/description typos, date `2026-12-10`. All fixed at the user's request; blind spots (attacker on WS-IT01, `it-admin` not covered) documented as comments in the rule. Verified: 3 of 4 lateral movement sources detected (WS-IT01 missed by design), 0 false positives in 1200 background ticks.
+- Tests: SEN-009 must-catch/must-ignore cases; `test_lateral_movement_is_a_detection_gap` replaced by "is detected" + "WS-IT01 is a blind spot". 173 passing. README (rule table, gaps, skills, roadmap) and `rules/README.md` (exercise marked solved, SEN-010 grep and SEN-007 tuning ideas) updated.
 - SOC topics taught: process creation telemetry (4688 / Sysmon 1) and the command line as evidence; Windows event IDs 4624/4625/4720; T1083 and what attackers search for (kdbx, pfx, configs); TP vs FP by context; evasion of exact string matches; tuning trade-offs; alert grouping and alert fatigue.
 
 **Decisions**
@@ -41,9 +44,9 @@ Entry template:
 - Same-origin check compares `Origin` with the `Host` header, so both `127.0.0.1:8000` and `localhost:8000` work. GET requests are not checked (other sites cannot read responses without CORS headers).
 
 **Next** (in this order)
-1. User commits this session's work (not committed yet).
+1. User commits the SEN-009 work (not committed yet).
 2. **Tuning exercise for the user:** cut SEN-007's false positives (e.g. a filter for the cloud storage range `198.51.100.0/24`), then check that real exfiltration to `203.0.113.x` is still caught.
-3. **Detection exercises for the user:** SEN-009 lateral movement (guide in `rules/README.md`); a rule for `grep -ri password` on Linux to close the File search gap; password spraying with `value_count`.
+3. **Detection exercises for the user:** SEN-010 for `grep -ri password` on Linux (closes the File search gap); password spraying with `value_count`.
 4. **SQLite storage** for events, alerts, attacks and triage, so games survive restarts. Then search/investigation (timeline per host/user), then a real Windows agent.
 
 ---

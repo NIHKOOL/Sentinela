@@ -1,0 +1,26 @@
+title: Admin logon from a non-IT workstation
+id: SEN-009
+status: experimental
+description: An admin account logged on from an internal machine that is not the IT workstation.
+author: NIHKOOL
+date: 2026-10-12
+tags:
+  - attack.lateral_movement
+  - attack.t1021                       # Remote Services
+logsource:
+  category: authentication
+detection:
+  selection:
+    event_type: authentication_success
+    user: [administrator, root]
+    source_ip|cidr: 10.0.0.0/8         # from inside the company network
+  it_workstation:
+    source_ip: 10.0.1.20               # WS-IT01, where admins normally work
+  condition: selection and not it_workstation
+# Known blind spots:
+# - An attacker who controls WS-IT01 is not detected (the exclusion trusts it completely).
+# - The it-admin account is not covered, because it logs on to servers as part of normal work.
+falsepositives:
+  - An administrator working from another desk
+level: high
+details: "'{user}' logged on to {hostname} from {source_ip}, which is not an IT workstation."
