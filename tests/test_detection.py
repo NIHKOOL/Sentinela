@@ -89,6 +89,7 @@ def test_account_created():
     ("203.0.113.9", 300_000_000, ["SEN-007"]),
     ("10.0.0.30", 300_000_000, []),        # internal backup
     ("203.0.113.9", 2_000_000, []),         # small upload
+    ("198.51.100.20", 100_000_000, []),
 ])
 def test_large_upload_to_internet(dest_ip, bytes_out, expected):
     e = event(event_type="network_connection", dest_ip=dest_ip, bytes_out=bytes_out)
