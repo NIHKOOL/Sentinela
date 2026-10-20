@@ -21,7 +21,7 @@ Entry template:
 
 ---
 
-## 2026-10-21 — SEN-007 tuning exercise
+## 2026-10-21 — SEN-007 tuning, SEN-010 password search rule
 
 **Done**
 - HISTORY.md: marked the SEN-009 work as committed (`9ceb21f`).
@@ -29,14 +29,20 @@ Entry template:
 - Test: `198.51.100.20` / 100 MB → no alert. Tests: 174 passing.
 - Measured one simulated hour (1200 ticks, same seed): SEN-007 false positives 35 → 0; the exfiltration attack to `203.0.113.x` is still detected.
 - SOC topics taught: alert fatigue, allow-list filters, and their blind spot (exfiltration to allowed cloud storage, T1567.002).
+- Committed by the user: `7130983` (HISTORY), `499dd08` (SEN-007 tuning).
+- **SEN-010 Password search in files** (`rules/sen-010-credentials-in-files.yml`, T1552.001, medium): Claude wrote the skeleton, the user filled it in. `search_programs` (grep, egrep, fgrep, zgrep, rg) and `secret_words` (`password`, `secret`). Review fixed: `egrap` typo, `ri` (a grep option, not a program), and `passwd` removed (matched `grep alice /etc/passwd`, an account lookup; the file holds no passwords).
+- Tests: shipped-rule ID lists use `f"SEN-{n:03d}"` (the old `SEN-00{n}` gives `SEN-0010`); SEN-010 must-catch/must-ignore cases; Linux File search is now detected by SEN-008 + SEN-010. Tests: 181 passing.
+- README (rule table, blind spots, false-positive list, skills, roadmap) and `rules/README.md` (SEN-007 / SEN-010 ideas marked solved) updated.
 
 **Decisions**
 - Cloud storage is filtered by destination range only (no size or port limit): the user's tuning choice.
+- SEN-010 is credential access (T1552.001), not discovery: it reads file contents for secrets.
 
 **Next** (in this order)
-1. Small polish in `sen-007-large-upload.yml`: remove the now-filtered first `falsepositives` entry, add a blind-spot comment above `filter_cloud_storage`; add a comment to the new test case. Then the user commits.
-2. **Detection exercises for the user:** SEN-010 for `grep -ri password` on Linux (closes the File search gap); password spraying with `value_count`.
-3. **SQLite storage** for events, alerts, attacks and triage, so games survive restarts. Then search/investigation (timeline per host/user), then a real Windows agent.
+1. User commits SEN-010 (rule, tests, docs).
+2. Small polish in `sen-007-large-upload.yml`: remove the now-filtered first `falsepositives` entry, add a blind-spot comment above `filter_cloud_storage`.
+3. **Detection exercise for the user:** password spraying with `value_count`.
+4. **SQLite storage** for events, alerts, attacks and triage, so games survive restarts. Then search/investigation (timeline per host/user), then a real Windows agent.
 
 ---
 

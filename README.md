@@ -140,8 +140,8 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 * **Correlation rules** remember earlier events: 5 failed logons from one source within 60 seconds is a brute force (SEN-003), and a successful logon from that source afterwards is critical (SEN-004).
 * Repeated matches of the same rule for the same host, user and source are **grouped** into one alert, like a real SIEM.
 * The simulation remembers which events came from the attacker (**ground truth**), but the SOC views never show it. The score compares your verdicts with the truth.
-* Some normal activity triggers rules on purpose (an admin running `whoami`, IT creating an account, a big upload to cloud storage, a developer searching code), so the SOC must learn to tell false positives apart.
-* Every rule has blind spots: lateral movement **from the IT workstation** (WS-IT01) is not detected, and on Linux the file search's `grep` is missed. Finding and closing gaps like this is the job of detection engineering.
+* Some normal activity triggers rules on purpose (an admin running `whoami`, IT creating an account, a developer searching code), so the SOC must learn to tell false positives apart.
+* Every rule has blind spots: lateral movement **from the IT workstation** (WS-IT01) is not detected, and an attacker uploading data to the allow-listed company cloud storage is missed. Finding and closing gaps like this is the job of detection engineering.
 * The web API only accepts changes from its own pages (requests from other websites get `403`, against CSRF) and only answers to `127.0.0.1` / `localhost` (against DNS rebinding). Agents and scripts that send no `Origin` header, like a real agent posting to `/api/v1/ingest`, are not affected.
 
 ### Detection rules · [MITRE ATT&CK documentation](https://attack.mitre.org/)
@@ -154,9 +154,10 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 | SEN-004 | Critical | Successful logon after brute force | [T1110](https://attack.mitre.org/techniques/T1110/) / [T1078](https://attack.mitre.org/techniques/T1078/) |
 | SEN-005 | Critical | Known credential theft tool | [T1003](https://attack.mitre.org/techniques/T1003/) |
 | SEN-006 | Medium | New user account created | [T1136](https://attack.mitre.org/techniques/T1136/) |
-| SEN-007 | High | 50 MB+ upload to an external IP | [T1048](https://attack.mitre.org/techniques/T1048/) |
+| SEN-007 | High | 50 MB+ upload to an external IP (company cloud storage allow-listed) | [T1048](https://attack.mitre.org/techniques/T1048/) |
 | SEN-008 | Low | File and folder searches (`dir /s`, `findstr`, `Get-ChildItem -Recurse`, `find`) | [T1083](https://attack.mitre.org/techniques/T1083/) |
 | SEN-009 | High | Lateral movement: admin logon from an internal machine that is not the IT workstation | [T1021](https://attack.mitre.org/techniques/T1021/) |
+| SEN-010 | Medium | Password search in files (`grep -ri password`, `rg secret`) | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) |
 
 Each rule is a file in [`rules/`](rules/). See **[rules/README.md](rules/README.md)** for how to write your own: fields, modifiers, conditions, correlation rules, and exercises.
 
@@ -174,7 +175,7 @@ What I learned and practiced while building Sentinela, with where to find the ev
 | **Reading endpoint telemetry** | Process creation events (in real environments: Windows Security **4688** / Sysmon **Event ID 1**), where the **command line** is the key evidence; logon success/failure (**4624 / 4625**); account creation (**4720**); outbound network connections with byte counts. |
 | **Following an attack through the kill chain** | Brute force → logon → discovery → file search → credential theft → backdoor account → lateral movement → exfiltration, each step mapped to [MITRE ATT&CK](https://attack.mitre.org/) (T1110, T1078, T1033/T1087, T1083, T1003, T1136, T1021, T1048). |
 | **Alert fatigue and grouping** | Measured over one simulated hour: SEN-008 matched **57 events** but produced only **2 alerts**, because repeats for the same host and user are grouped. SEN-007 produced **22 false positives per hour at HIGH severity**: a rule that needs tuning before analysts learn to ignore it. |
-| **Finding detection gaps** | Lateral movement was invisible to the original rules until I wrote SEN-009. Its remaining blind spot is an attacker on the trusted IT workstation; on Linux the file search's `grep` is still missed. Knowing what the SIEM *cannot* see matters as much as the alerts it raises. |
+| **Finding detection gaps** | Lateral movement was invisible to the original rules until I wrote SEN-009. Its remaining blind spot is an attacker on the trusted IT workstation; SEN-010 closed the Linux file search gap (`grep -ri password`), and tuning SEN-007 cut its false positives from about 35 to 0 per hour at the cost of a documented blind spot. Knowing what the SIEM *cannot* see matters as much as the alerts it raises. |
 
 ### Detection engineering
 
@@ -244,8 +245,9 @@ Sentinela/
 - [x] Rules in Sigma-style YAML files, editable and reloadable without changing code
 - [x] File search attack (T1083) and my own detection rule SEN-008, with true and false positives to triage
 - [x] Protection against cross-site requests (CSRF) and DNS rebinding
-- [ ] Tune the noisiest rule (SEN-007: allowlist known cloud storage)
+- [x] Tune the noisiest rule (SEN-007: allowlist known cloud storage)
 - [x] A rule that catches lateral movement (SEN-009)
+- [x] A rule that catches password searches in files on Linux (SEN-010)
 - [ ] Save events and alerts in SQLite so a game survives restarts
 - [ ] Real Windows agent that sends Event Log data to `/api/v1/ingest`
 

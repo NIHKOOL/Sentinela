@@ -98,7 +98,7 @@ def test_large_upload_to_internet(dest_ip, bytes_out, expected):
 
 def test_shipped_rules_load_without_errors():
     assert RULESET.errors == []
-    assert [meta.id for meta in RULESET.alerting] == [f"SEN-00{n}" for n in range(1, 10)]
+    assert [meta.id for meta in RULESET.alerting] == [f"SEN-{n:03d}" for n in range(1, 11)]
 
 
 def test_building_block_rules_do_not_alert_by_themselves():
@@ -175,4 +175,27 @@ def test_admin_logon_from_non_it_machine_is_detected(user, source_ip):
 ])
 def test_lateral_movement_rule_ignores_other_logons(user, source_ip):
     e = event(hostname="DB01", event_type="authentication_success", user=user, source_ip=source_ip)
+    assert Detector(RULESET).evaluate(1, e) == []
+
+
+# --- SEN-010: password search in files ---
+
+@pytest.mark.parametrize("process,command", [
+    ("/usr/bin/grep", "grep -ri password /etc /var/www"),   # the File search attack
+    ("/usr/bin/grep", "grep -ri PASSWORD /etc"),            # upper case
+    ("/usr/bin/egrep", "egrep -ri secret /var/www"),
+    ("/usr/bin/rg", "rg -i password /home"),
+])
+def test_password_search_is_detected(process, command):
+    e = event(hostname="WEB01", event_type="process_creation", process_name=process, command_line=command)
+    assert rule_ids(Detector(RULESET).evaluate(1, e)) == ["SEN-010"]
+
+
+@pytest.mark.parametrize("process,command", [
+    ("/usr/bin/grep", "grep error /var/log/syslog"),        # normal log search
+    ("/usr/bin/grep", "grep alice /etc/passwd"),            # account lookup: /etc/passwd holds no passwords
+    ("/usr/bin/cat", "cat password.txt"),                   # not a search tool
+])
+def test_password_search_rule_ignores_other_commands(process, command):
+    e = event(hostname="WEB01", event_type="process_creation", process_name=process, command_line=command)
     assert Detector(RULESET).evaluate(1, e) == []

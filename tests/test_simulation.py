@@ -50,10 +50,10 @@ def test_password_guessing_with_success_triggers_brute_force_and_critical(sim):
     assert set(result["detected_by"]) == {"SEN-002", "SEN-003", "SEN-004"}
 
 
-def test_file_search_on_linux_is_only_partly_detected(sim):
-    # find is caught, grep is not: a small gap to close with a new rule
+def test_file_search_on_linux_is_detected(sim):
+    # find is caught by SEN-008, grep by SEN-010
     result = attack(sim, "file_search", "WEB01")
-    assert result["detected_by"] == ["SEN-008"]
+    assert set(result["detected_by"]) == {"SEN-008", "SEN-010"}
     [alert] = [a for a in sim.list_alerts() if a["rule_id"] == "SEN-008"]
     assert alert["count"] == 1 and len(result["event_ids"]) == 2
 

@@ -151,8 +151,8 @@ details: "'{user}' logged on to {hostname} from {source_ip}, which is not an IT 
 Then click **Reload rules**, launch **Lateral movement** on the Attacker page, and watch "Not detected" turn into "Detected". Try it from WS-IT01 too: the exclusion makes that a blind spot.
 
 **More ideas to try:**
-* **Close the Linux file search gap (SEN-010):** catch `grep -ri password` (look at `process_file` and `command_line|contains|all`).
-* **Tune SEN-007:** filter out the cloud storage range `198.51.100.0/24`, and check that exfiltration to `203.0.113.x` is still caught.
+* ~~**Close the Linux file search gap (SEN-010)**~~ solved: see `sen-010-credentials-in-files.yml`.
+* ~~**Tune SEN-007**~~ solved: `filter_cloud_storage` in `sen-007-large-upload.yml`.
 * **Password spraying:** use `value_count` to catch one source IP failing logons for many different users.
 * **Tuning:** remove SEN-001's false positives from `it-admin` with a filter, then check whether you would still catch a real attacker.
 
