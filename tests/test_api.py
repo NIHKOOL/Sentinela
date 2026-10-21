@@ -217,3 +217,51 @@ def test_allowed_hosts_can_be_configured(tmp_path):
     client = TestClient(create_app(data_dir=tmp_path, allowed_hosts=["sentinela.lab"]), base_url="http://sentinela.lab")
     assert client.get("/health").status_code == 200
     assert client.get("/health", headers={"Host": "127.0.0.1"}).status_code == 400
+
+
+# --- Event search and investigation filters ---
+
+INVESTIGATION_EVENTS = [
+    {"timestamp": "2026-10-21T10:00:00Z", "hostname": "DC01", "event_type": "authentication_failure",
+     "user": "administrator", "source_ip": "203.0.113.7"},
+    {"timestamp": "2026-10-21T10:05:00Z", "hostname": "DC01", "event_type": "authentication_success",
+     "user": "Administrator", "source_ip": "203.0.113.7"},
+    {"timestamp": "2026-10-21T10:06:00Z", "hostname": "DC01", "event_type": "process_creation",
+     "user": "administrator", "process_name": "whoami.exe", "command_line": "whoami"},
+    {"timestamp": "2026-10-21T10:30:00Z", "hostname": "DB01", "event_type": "network_connection",
+     "user": "sqlsvc", "dest_ip": "203.0.113.7", "dest_port": 443, "bytes_out": 1000},
+    {"timestamp": "2026-10-21T11:00:00Z", "hostname": "WS-BOB", "event_type": "process_creation",
+     "user": "bob", "process_name": "excel.exe"},
+]
+
+
+@pytest.fixture
+def investigation(client):
+    for event in INVESTIGATION_EVENTS:
+        assert client.post("/api/v1/ingest", json=event).status_code == 200
+    return client
+
+
+def search_times(client, **params) -> list[str]:
+    response = client.get("/api/v1/events", params=params)
+    assert response.status_code == 200
+    return [e["timestamp"][11:16] for e in response.json()]
+
+
+@pytest.mark.parametrize("params,expected", [
+    ({"user": "ADMINISTRATOR"}, ["10:06", "10:05", "10:00"]),          # ignores case
+    ({"ip": "203.0.113.7"}, ["10:30", "10:05", "10:00"]),              # source or destination
+    ({"event_type": "process_creation"}, ["11:00", "10:06"]),
+    ({"hostname": "dc01", "event_type": "authentication_success"}, ["10:05"]),   # all filters must match
+    ({"since": "2026-10-21T10:05:00Z", "until": "2026-10-21T10:30:00Z"}, ["10:30", "10:06", "10:05"]),
+    ({"since": "2026-10-21T10:05:00", "until": "2026-10-21T10:06:00"}, ["10:06", "10:05"]),  # no timezone = UTC
+    ({"hostname": "DC01", "oldest_first": "true"}, ["10:00", "10:05", "10:06"]),  # timeline order
+    ({"user": "nobody"}, []),
+])
+def test_event_filters(investigation, params, expected):
+    assert search_times(investigation, **params) == expected
+
+
+@pytest.mark.parametrize("params", [{"event_type": "bogus"}, {"since": "yesterday"}, {"user": "x" * 101}])
+def test_bad_event_filters_are_rejected(client, params):
+    assert client.get("/api/v1/events", params=params).status_code == 422

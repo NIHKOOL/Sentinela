@@ -21,7 +21,7 @@ Entry template:
 
 ---
 
-## 2026-10-21 — SEN-007 tuning, SEN-010 password search rule, SQLite storage
+## 2026-10-21 — SEN-007 tuning, SEN-010 password search rule, SQLite storage, investigation
 
 **Done**
 - HISTORY.md: marked the SEN-009 work as committed (`9ceb21f`).
@@ -38,7 +38,13 @@ Entry template:
 - Fixed a ground-truth leak found on the way: the event search also searched the hidden `origin` field, so searching "attack" listed only attacker events. `origin` is now outside the searchable data.
 - Removed the 5000-event memory cap (the database keeps every event until **Reset**). Correlation memory is not saved: it starts empty after a restart.
 - New `tests/test_storage.py` (5 tests: game survives a restart, ids continue, grouping joins a saved alert, reset clears the file, search hides ground truth). Tests: 186 passing. Verified live on port 8766: attack + restart → events, alert and attack still there.
-- README (feature note, troubleshooting "fresh game", project structure, roadmap) and `.gitignore` comment updated.
+- README (feature note, troubleshooting "fresh game", project structure, roadmap) and `.gitignore` comment updated. Committed by the user: `ada7fcb` (SEN-007 polish), `9f131c6` (SQLite storage).
+- Taught SQL on `data/sentinela.db` (VS Code SQLite extensions, `json_extract`, GROUP BY, the WAL caveat); queries for host events, failed logons per IP (with `users_tried` to tell brute force from spraying) and the open HIGH/CRITICAL queue.
+- **Search / investigation** (SOC page):
+  - `GET /api/v1/events` new filters: `user` (ignores case), `ip` (source or destination), `event_type`, `since` / `until` (no timezone = UTC), `oldest_first`; all filters must match. SQL in `Store.list_events` via `json_extract`; timestamps compared as fixed-format UTC text (`_utc_text`).
+  - SOC page: filter bar (host, event type, user, IP, text, Clear); hosts, users and IPs in the event table and alert details are **pivots** (click = show all events for that value, other filters cleared); **Timeline ±10 min** button on an alert (host + time window, oldest first, the alert's own events highlighted, removable chip).
+  - Tests: 11 API filter tests. Tests: 197 passing. Verified in headless Chrome via DevTools Protocol (15 click checks: timeline, highlight, pivots, type filter, Clear, filters survive polling).
+- Mistake: my live tests loaded the user's `.env`, so a few simulated alerts were posted to their Discord. Live tests now set `DISCORD_WEBHOOK_URL=""`.
 
 **Decisions**
 - Cloud storage is filtered by destination range only (no size or port limit): the user's tuning choice.
@@ -46,9 +52,11 @@ Entry template:
 - SQLite is the single source of truth (no in-memory copy), to prepare for search/investigation queries. Events are not pruned for now.
 
 **Next** (in this order)
-1. User commits the SQLite storage work and the SEN-007 polish.
-2. **Search/investigation:** a timeline per host or user (SQL queries on `events`), then a real Windows agent.
+1. User commits the investigation work.
+2. Optional investigation extras: "Top" summary for a host/user (most-run programs, failed-logon IPs), keep the pivot filters in the URL so an investigation can be bookmarked.
 3. **Detection exercise for the user:** password spraying with `value_count` (needs a new attack scenario).
+4. Real Windows agent that sends Event Log data to `/api/v1/ingest`.
+- Known issue (older than this session): on phone width (~420 px) the whole page is wider than the screen (top bar chips and stat cards overflow).
 - Later: maybe prune old events (e.g. keep the last N days) if the database grows too big.
 
 ---

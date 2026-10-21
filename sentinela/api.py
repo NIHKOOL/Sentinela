@@ -2,6 +2,7 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlsplit
@@ -14,7 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .alerting import DiscordNotifier
 from .attacks import SCENARIOS
-from .models import AlertUpdate, AssetIn, AttackRequest, SimulationSettings, TelemetryEvent
+from .models import AlertUpdate, AssetIn, AttackRequest, EventType, SimulationSettings, TelemetryEvent
 from .organization import Organization
 from .rules import DEFAULT_RULES_DIR, RuleSet, load_rules
 from .simulation import Simulation
@@ -137,8 +138,16 @@ def ingest_event(event: TelemetryEvent, request: Request):
 
 @router.get("/events")
 def list_events(request: Request, limit: int = Query(100, ge=1, le=1000),
-                hostname: Optional[str] = None, search: Optional[str] = Query(None, max_length=200)):
-    return get_sim(request).list_events(limit, hostname, search)
+                hostname: Optional[str] = Query(None, max_length=100),
+                user: Optional[str] = Query(None, max_length=100),
+                ip: Optional[str] = Query(None, max_length=100),
+                event_type: Optional[EventType] = None,
+                since: Optional[datetime] = None, until: Optional[datetime] = None,
+                oldest_first: bool = False,
+                search: Optional[str] = Query(None, max_length=200)):
+    """Search events: every given filter must match. `ip` matches the source or the destination."""
+    return get_sim(request).list_events(limit, hostname=hostname, user=user, ip=ip, event_type=event_type,
+                                        since=since, until=until, oldest_first=oldest_first, search=search)
 
 
 # --- SOC ---

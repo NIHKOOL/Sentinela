@@ -10,6 +10,7 @@ never part of the event data the SOC sees or searches.
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -108,7 +109,7 @@ class Store:
     def add_event(self, event: TelemetryEvent, origin: str, attack_id: Optional[int]) -> int:
         cursor = self.db.execute(
             "INSERT INTO events (timestamp, hostname, data, origin, attack_id) VALUES (?, ?, ?, ?, ?)",
-            (event.timestamp.isoformat(timespec="microseconds"), event.hostname,
+            (_utc_text(event.timestamp), event.hostname,
              json.dumps(event.model_dump(mode="json")), origin, attack_id))
         return cursor.lastrowid
 
@@ -126,18 +127,41 @@ class Store:
         by_id = {row["id"]: _event(row) for row in rows}
         return [by_id[i] for i in event_ids if i in by_id]
 
-    def list_events(self, limit: int, hostname: Optional[str] = None, search: Optional[str] = None) -> list[dict]:
-        """Newest first by event time. `search` looks in every field the SOC can see, ignoring case."""
+    def list_events(self, limit: int, hostname: Optional[str] = None, search: Optional[str] = None,
+                    user: Optional[str] = None, ip: Optional[str] = None, event_type: Optional[str] = None,
+                    since: Optional[datetime] = None, until: Optional[datetime] = None,
+                    oldest_first: bool = False) -> list[dict]:
+        """Events matching every given filter, newest first by event time (or oldest first, for a timeline).
+
+        `search` looks in every field the SOC can see; `ip` matches the source or the destination.
+        Text filters ignore upper/lower case.
+        """
         sql = f"SELECT e.id, e.data, {EVENT_ALERT_IDS} FROM events e WHERE 1 = 1"
         params: list = []
         if hostname:
             sql += " AND lower(e.hostname) = lower(?)"
             params.append(hostname)
+        if user:
+            sql += " AND lower(json_extract(e.data, '$.user')) = lower(?)"
+            params.append(user)
+        if ip:
+            sql += " AND (json_extract(e.data, '$.source_ip') = ? OR json_extract(e.data, '$.dest_ip') = ?)"
+            params += [ip, ip]
+        if event_type:
+            sql += " AND json_extract(e.data, '$.event_type') = ?"
+            params.append(event_type)
+        if since:
+            sql += " AND e.timestamp >= ?"
+            params.append(_utc_text(since))
+        if until:
+            sql += " AND e.timestamp <= ?"
+            params.append(_utc_text(until))
         if search:
             sql += (" AND EXISTS (SELECT 1 FROM json_each(e.data) f "
                     "WHERE f.value IS NOT NULL AND instr(lower(CAST(f.value AS TEXT)), lower(?)) > 0)")
             params.append(search)
-        sql += " ORDER BY e.timestamp DESC, e.id DESC LIMIT ?"
+        order = "ASC" if oldest_first else "DESC"
+        sql += f" ORDER BY e.timestamp {order}, e.id {order} LIMIT ?"
         params.append(limit)
         return [_event(row) for row in self.db.execute(sql, params)]
 
@@ -229,6 +253,12 @@ class Store:
     def attack(self, attack_id: int) -> Optional[dict]:
         attacks = self.list_attacks(attack_id)
         return attacks[0] if attacks else None
+
+
+def _utc_text(moment: datetime) -> str:
+    """One fixed text format in UTC, so comparing the text compares the time. No timezone = UTC."""
+    moment = moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment.astimezone(timezone.utc)
+    return moment.isoformat(timespec="microseconds")
 
 
 def _event(row: sqlite3.Row) -> dict:

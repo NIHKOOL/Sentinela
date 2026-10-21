@@ -18,7 +18,14 @@
   .detail .section-title { font-size: 12.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin: 4px 0 -4px; }
   .tips { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
   .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .filters input { width: 180px; }
+  .filters input { width: 150px; }
+  .filters input.short { width: 110px; }
+  #events-panel { scroll-margin-top: 72px; }
+  .pivot { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer;
+           text-decoration: underline dotted; text-underline-offset: 3px; overflow-wrap: anywhere; text-align: left; }
+  .pivot:hover { text-decoration-style: solid; }
+  .in-alert td { background: var(--accent-soft); }
+  .window-chip .pivot { text-decoration: none; font-weight: 600; margin-left: 4px; }
   .closed-row td { opacity: .6; }
   .related { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
   .related-event { padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
@@ -73,11 +80,16 @@
         </div>
       </section>
 
-      <section class="panel">
-        <h2>Event stream
+      <section class="panel" id="events-panel">
+        <h2>Event stream <span class="sub" id="events-sub"></span>
           <div class="filters">
             <select id="host-filter" aria-label="Filter by host"><option value="">All hosts</option></select>
+            <select id="type-filter" aria-label="Filter by event type"><option value="">All event types</option></select>
+            <input id="user-filter" class="short" type="search" placeholder="User" aria-label="Filter by user">
+            <input id="ip-filter" class="short" type="search" placeholder="IP address" aria-label="Filter by IP address">
             <input id="search" type="search" placeholder="Search events…" aria-label="Search events">
+            <span class="chip window-chip hidden" id="window-chip"><span id="window-text"></span><button class="pivot" id="window-clear" type="button" aria-label="Remove the time window" title="Remove the time window">×</button></span>
+            <button class="btn small" id="clear-filters" type="button">Clear</button>
             <button class="btn small" id="pause" type="button">Pause</button>
           </div>
         </h2>
@@ -111,6 +123,10 @@ let rules = {};
 let assets = [];
 let selectedId = null;
 let streamPaused = false;
+let timeWindow = null;          // { since, until, label } while looking at a timeline around an alert
+let highlighted = new Set();    // ids of the events of that alert
+const FILTERS = { hostname: "host-filter", event_type: "type-filter", user: "user-filter", ip: "ip-filter", search: "search" };
+const TIMELINE_MINUTES = 10;
 
 const statusBadge = (status) => badge(...STATUS[status]);
 
@@ -145,24 +161,93 @@ async function refresh() {
 }
 
 async function refreshEvents() {
-  const host = document.getElementById("host-filter").value;
-  const search = document.getElementById("search").value.trim();
-  const params = new URLSearchParams({ limit: "150" });
-  if (host) params.set("hostname", host);
-  if (search) params.set("search", search);
+  const params = new URLSearchParams({ limit: "200" });
+  for (const [name, id] of Object.entries(FILTERS)) {
+    const value = document.getElementById(id).value.trim();
+    if (value) params.set(name, value);
+  }
+  if (timeWindow) {
+    params.set("since", timeWindow.since);
+    params.set("until", timeWindow.until);
+    params.set("oldest_first", "true");  // a timeline reads from top to bottom
+  }
   const events = await api(`/events?${params}`);
 
+  const filtered = [...params.keys()].length > 1;
+  document.getElementById("events-sub").textContent = filtered ? `${events.length} matching${timeWindow ? ", oldest first" : ""}` : "";
   document.getElementById("events-empty").classList.toggle("hidden", events.length > 0);
-  document.getElementById("events").replaceChildren(...events.map((e) => el("tr", { class: e.alert_ids.length ? "alerted" : "" }, [
+  document.getElementById("events").replaceChildren(...events.map((e) => el("tr", {
+    class: [e.alert_ids.length ? "alerted" : "", highlighted.has(e.id) ? "in-alert" : ""].join(" "),
+  }, [
     el("td", { class: "muted", text: formatTime(e.timestamp) }),
-    el("td", { text: e.hostname }),
+    el("td", {}, pivot("hostname", e.hostname)),
     el("td", { text: EVENT_LABELS[e.event_type] || e.event_type }),
-    el("td", { text: e.user }),
-    el("td", { class: "wrap" }, el("code", { text: describeEvent(e) })),
+    el("td", {}, pivot("user", e.user)),
+    el("td", { class: "wrap" }, eventDetails(e)),
     el("td", {}, e.alert_ids.map((id) => el("button", {
       class: "btn small", type: "button", text: `#${id}`, onclick: () => select(id),
     }))),
   ])));
+}
+
+// --- Investigation: pivots and timelines ---
+
+// A clickable value: shows every event with this host, user or IP ("pivoting" from one clue to the next)
+function pivot(field, value) {
+  if (!value) return "—";
+  const label = field === "hostname" ? "host" : field === "ip" ? "IP" : field;
+  return el("button", { class: "pivot", type: "button", text: value, title: `Show all events for ${label} ${value}`,
+    onclick: (event) => { event.stopPropagation(); investigate({ [field]: value }); } });
+}
+
+// Like describeEvent, but IP addresses are pivots
+function eventDetails(e) {
+  switch (e.event_type) {
+    case "authentication_success":
+    case "authentication_failure":
+      return el("code", {}, e.source_ip ? ["from ", pivot("ip", e.source_ip)] : "from unknown source");
+    case "network_connection": {
+      const mb = e.bytes_out ? ` ${(e.bytes_out / 1e6).toFixed(1)} MB` : "";
+      return el("code", {}, ["→ ", pivot("ip", e.dest_ip), `${e.dest_port ? ":" + e.dest_port : ""}${mb}`]);
+    }
+    default:
+      return el("code", { text: describeEvent(e) });
+  }
+}
+
+function setHostFilter(hostname) {
+  const select = document.getElementById("host-filter");
+  const option = [...select.options].find((o) => o.value.toLowerCase() === hostname.toLowerCase());
+  if (option) select.value = option.value;
+  else select.append(el("option", { value: hostname, text: hostname, selected: true }));  // a host outside the organization
+}
+
+// Replace every filter with these ones, then show the results
+function investigate(filters, range = null, highlight = []) {
+  for (const id of Object.values(FILTERS)) document.getElementById(id).value = "";
+  for (const [name, value] of Object.entries(filters)) {
+    if (name === "hostname") setHostFilter(value);
+    else document.getElementById(FILTERS[name]).value = value;
+  }
+  setTimeWindow(range, highlight);
+  refreshEvents();
+  document.getElementById("events-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function setTimeWindow(range, highlight = []) {
+  timeWindow = range;
+  highlighted = new Set(highlight);
+  document.getElementById("window-chip").classList.toggle("hidden", !range);
+  document.getElementById("window-text").textContent = range ? range.label : "";
+}
+
+function showTimeline(alert) {
+  const margin = TIMELINE_MINUTES * 60 * 1000;
+  investigate({ hostname: alert.hostname }, {
+    since: new Date(new Date(alert.first_seen).getTime() - margin).toISOString(),
+    until: new Date(new Date(alert.last_seen).getTime() + margin).toISOString(),
+    label: `±${TIMELINE_MINUTES} min around alert #${alert.id}`,
+  }, alert.event_ids);
 }
 
 async function loadAssets() {
@@ -215,11 +300,11 @@ async function renderDetail() {
     ]),
     el("div", { text: alert.details }),
     el("dl", {}, [
-      el("dt", { text: "Host" }), el("dd", {}, [alert.hostname, " ", asset ? badge(`${asset.criticality} criticality`, CRIT_KIND[asset.criticality]) : null]),
+      el("dt", { text: "Host" }), el("dd", {}, [pivot("hostname", alert.hostname), " ", asset ? badge(`${asset.criticality} criticality`, CRIT_KIND[asset.criticality]) : null]),
       el("dt", { text: "Asset" }), el("dd", { text: asset ? `${asset.os} · ${asset.department} · ${asset.ip}` : "Not in organization" }),
       el("dt", { text: "Known users" }), el("dd", { text: asset ? asset.users.join(", ") || "—" : "—" }),
-      el("dt", { text: "User" }), el("dd", { text: alert.user }),
-      el("dt", { text: "Source IP" }), el("dd", { text: alert.source_ip || "—" }),
+      el("dt", { text: "User" }), el("dd", {}, pivot("user", alert.user)),
+      el("dt", { text: "Source IP" }), el("dd", {}, pivot("ip", alert.source_ip)),
       el("dt", { text: "MITRE" }), el("dd", {}, el("code", { text: alert.mitre })),
       el("dt", { text: "Seen" }), el("dd", { text: `${formatTime(alert.first_seen)} – ${formatTime(alert.last_seen)} (${alert.count} events)` }),
     ]),
@@ -240,12 +325,15 @@ async function renderDetail() {
       el("li", { text: "Is the user someone who normally works on this host (see Known users)?" }),
       el("li", { text: "Does the source IP belong to the organization (10.x.x.x), or come from outside?" }),
       el("li", { text: "Did other alerts fire on the same host around the same time?" }),
+      el("li", { text: "Click a host, user or IP to see all of its events. What else did this user or IP do?" }),
     ]),
-    el("div", {}, el("button", { class: "btn small", type: "button", text: `Show all events from ${alert.hostname}`, onclick: () => {
-      document.getElementById("host-filter").value = alert.hostname;
-      document.getElementById("search").value = "";
-      refreshEvents();
-    } })),
+    el("div", { class: "btn-row" }, [
+      el("button", { class: "btn small", type: "button", text: `Timeline: ±${TIMELINE_MINUTES} min on ${alert.hostname}`,
+        title: "What happened on this host just before and after the alert? The alert's own events are highlighted.",
+        onclick: () => showTimeline(alert) }),
+      el("button", { class: "btn small", type: "button", text: `All events from ${alert.hostname}`,
+        onclick: () => investigate({ hostname: alert.hostname }) }),
+    ]),
     el("div", { class: "section-title", text: "Verdict" }),
     notes,
     closed
@@ -280,11 +368,18 @@ async function triage(update) {
 
 document.getElementById("alert-filter").addEventListener("change", refresh);
 document.getElementById("host-filter").addEventListener("change", refreshEvents);
+document.getElementById("type-filter").addEventListener("change", refreshEvents);
 let searchTimer;
-document.getElementById("search").addEventListener("input", () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(refreshEvents, 250);
-});
+for (const id of ["user-filter", "ip-filter", "search"]) {
+  document.getElementById(id).addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(refreshEvents, 250);
+  });
+}
+document.getElementById("window-clear").addEventListener("click", () => { setTimeWindow(null); refreshEvents(); });
+document.getElementById("clear-filters").addEventListener("click", () => investigate({}));
+document.getElementById("type-filter").append(
+  ...Object.entries(EVENT_LABELS).map(([value, text]) => el("option", { value, text })));
 document.getElementById("pause").addEventListener("click", (e) => {
   streamPaused = !streamPaused;
   e.target.textContent = streamPaused ? "Resume" : "Pause";

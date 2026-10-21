@@ -13,7 +13,7 @@
 
 * **Organization:** a virtual company of workstations and servers that produce normal activity all the time (logons, programs, file copies, the occasional admin task).
 * **Attacker:** launch simulated attack steps (password guessing, discovery, file search, credential theft, persistence, lateral movement, exfiltration) against any machine.
-* **SOC:** detection rules raise alerts. Work the alert queue, investigate the events, and decide for each alert whether it is a real attack (**true positive**) or normal work (**false positive**).
+* **SOC:** detection rules raise alerts. Work the alert queue, investigate the events, and decide for each alert whether it is a real attack (**true positive**) or normal work (**false positive**). Investigate like a real analyst: filter events by host, user, IP, event type or text, click any host, user or IP to **pivot** to all of its events, and open a **timeline** of everything on the host ±10 minutes around an alert.
 * **Score:** see which attacks were detected or missed, and how many of your verdicts were right.
 
 **Everything is simulated.** Attack steps only create the log entries such an attack would leave behind, inside the app. Nothing runs on or touches a real computer.
@@ -174,6 +174,7 @@ What I learned and practiced while building Sentinela, with where to find the ev
 | Skill | How it shows up in this project |
 |---|---|
 | **Alert triage: true vs. false positive** | Each alert is judged on context: who ran it, on which machine, with which command, and whether that is normal for this user. Example: `it-admin` running `systeminfo` on DC01 is routine admin work (FP), but `administrator` running `findstr /si password *.config` on the database server DB01 is an attacker hunting for credentials (TP). The score page checks every verdict against the ground truth. |
+| **Investigation: pivoting and timelines** | From one alert to the full story: click the attacker's IP to see every host it touched, click the user to see what else the account did, and open the ±10 minute timeline on the host to see what happened just before and after. The same questions can be asked in SQL on `data/sentinela.db` (`json_extract` on the event data). |
 | **Reading endpoint telemetry** | Process creation events (in real environments: Windows Security **4688** / Sysmon **Event ID 1**), where the **command line** is the key evidence; logon success/failure (**4624 / 4625**); account creation (**4720**); outbound network connections with byte counts. |
 | **Following an attack through the kill chain** | Brute force → logon → discovery → file search → credential theft → backdoor account → lateral movement → exfiltration, each step mapped to [MITRE ATT&CK](https://attack.mitre.org/) (T1110, T1078, T1033/T1087, T1083, T1003, T1136, T1021, T1048). |
 | **Alert fatigue and grouping** | Measured over one simulated hour: SEN-008 matched **57 events** but produced only **2 alerts**, because repeats for the same host and user are grouped. SEN-007 produced **22 false positives per hour at HIGH severity**: a rule that needs tuning before analysts learn to ignore it. |
@@ -252,7 +253,7 @@ Sentinela/
 - [x] A rule that catches lateral movement (SEN-009)
 - [x] A rule that catches password searches in files on Linux (SEN-010)
 - [x] Save events and alerts in SQLite so a game survives restarts
-- [ ] Search and investigation: a timeline per host or user
+- [x] Search and investigation: filters, pivots on host / user / IP, timeline around an alert
 - [ ] Real Windows agent that sends Event Log data to `/api/v1/ingest`
 
 ---

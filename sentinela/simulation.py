@@ -160,10 +160,11 @@ class Simulation:
 
     # --- SOC views (no ground truth) ---
 
-    def list_events(self, limit: int = 100, hostname: Optional[str] = None, search: Optional[str] = None) -> list[dict]:
+    def list_events(self, limit: int = 100, **filters) -> list[dict]:
+        """Events for the SOC; `filters` are the ones of Store.list_events (hostname, user, ip, search ...)."""
         # Newest first by event time (attack steps are backdated a few seconds, like late-arriving logs)
         with self.lock:
-            return self.store.list_events(limit, hostname, search)
+            return self.store.list_events(limit, **filters)
 
     def list_alerts(self, status: Optional[str] = None) -> list[dict]:
         with self.lock:
