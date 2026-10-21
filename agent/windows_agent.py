@@ -54,7 +54,9 @@ CMDLINE_VALUE = "ProcessCreationIncludeCmdLine_Enabled"
 
 DEFAULT_SERVER = "http://127.0.0.1:8000"
 KEY_ENV = "SENTINELA_INGEST_KEY"   # read from the environment, never from the command line (4688 would log it)
-DEFAULT_STATE = Path(__file__).resolve().parent.parent / "data" / "agent-state.json"
+_HERE = Path(__file__).resolve().parent
+# Inside the Sentinela project: data/ (not committed). Copied alone to another PC: next to this file.
+DEFAULT_STATE = (_HERE.parent / "data" if (_HERE.parent / "sentinela").is_dir() else _HERE) / "agent-state.json"
 BATCH = 200
 
 
@@ -143,8 +145,20 @@ def _timestamp(system_time: str) -> str:
     return f"{head}.{rest[:6]}Z" if dot else f"{head}Z"
 
 
-def to_telemetry(raw: dict, include_system: bool = False) -> Optional[dict]:
-    """A Sentinela event for one Windows event, or None if it is skipped as noise."""
+def _pid(text: Optional[str]) -> Optional[int]:
+    """Windows writes process ids in hex, like '0x1f40'."""
+    try:
+        return int(text, 16)
+    except (TypeError, ValueError):
+        return None
+
+
+def to_telemetry(raw: dict, include_system: bool = False, own_pid: Optional[int] = None) -> Optional[dict]:
+    """A Sentinela event for one Windows event, or None if it is skipped as noise.
+
+    `own_pid`: the agent's process id. Programs the agent starts itself (wevtutil, every few seconds)
+    are skipped by their parent process id, not by their command line, which anyone could copy to hide.
+    """
     kind = EVENT_TYPES.get(raw["event_id"])
     if kind is None:
         return None
@@ -152,6 +166,8 @@ def to_telemetry(raw: dict, include_system: bool = False) -> Optional[dict]:
     event = {"timestamp": _timestamp(raw["time"]), "hostname": raw["computer"].split(".")[0], "event_type": kind}
 
     if kind == "process_creation":
+        if own_pid is not None and _pid(data.get("ProcessId")) == own_pid:
+            return None
         # TargetUserName is the account the new process runs as (Windows 10+); older logs only have the subject
         user = _value(data.get("TargetUserName")) or _value(data.get("SubjectUserName"))
         event.update(process_name=_value(data.get("NewProcessName")), command_line=_value(data.get("CommandLine")))
@@ -217,7 +233,7 @@ def handle(events: list[dict], args, sent_to: Optional[str]) -> Optional[int]:
     """Send (or print) a batch. Returns the record id of the last event handled; stops at the first send error."""
     handled = None
     for raw in events:
-        event = to_telemetry(raw, args.include_system)
+        event = to_telemetry(raw, args.include_system, os.getpid())
         if event is not None:
             if sent_to is None:
                 print(json.dumps(event))

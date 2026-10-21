@@ -137,3 +137,11 @@ def test_key_comes_from_the_environment_not_the_command_line(monkeypatch):
     assert agent.main(["--once"]) == "s3cret"
     with pytest.raises(SystemExit):
         agent.main(["--key", "s3cret"])   # no such option
+
+
+def test_the_agents_own_wevtutil_is_skipped():
+    # The agent runs wevtutil every few seconds; Windows logs that as 4688 with the agent as parent (hex pid)
+    own = xml_event(4688, 200, SubjectUserName="nihkool", TargetUserName="-", ProcessId="0x1f40",
+                    NewProcessName="C:\Windows\System32\wevtutil.exe", CommandLine="wevtutil qe Security")
+    assert telemetry(own, own_pid=0x1F40) is None
+    assert telemetry(own, own_pid=1234) is not None   # the same command from another process is kept
