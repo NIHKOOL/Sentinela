@@ -19,11 +19,12 @@ detection:
       - 172.16.0.0/12
       - 192.168.0.0/16
       - 127.0.0.0/8
+  # Company cloud storage: big uploads here are normal.
+  # Blind spot: an attacker exfiltrating to this storage (T1567.002) is not detected.
   filter_cloud_storage:
     dest_ip|cidr: 198.51.100.0/24
   condition: selection and not internal_destination and not filter_cloud_storage
 falsepositives:
-  - Employees uploading large files to cloud storage to destination ip 198.51.100.0/24
   - Backups to an online service
   - Upload to cloud services not in the allow list
 level: high
