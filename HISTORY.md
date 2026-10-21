@@ -53,7 +53,7 @@ Entry template:
 - Remote agent tried for real on a second PC (laptop → `192.168.1.56`): first a 401 because the user had put the key into `KEY_ENV` (the variable *name*); fixed, and real `whoami` from the laptop reached the SOC. Advised rotating the key (shown in a screenshot). Found on the main PC: network profile is Public and a broad `python.exe` inbound Allow rule for Public exists (from the Windows prompt); advised Private + the narrow "Sentinela ingest" rule (not changed by Claude).
 - Agent state file: next to the script when copied alone (was `<parent>\data`), still `data/` inside the project.
 - Agent self-noise: its own `wevtutil` every 5 s showed up as 4688 events. Now skipped by **parent process id** (4688 `ProcessId`, hex) = the agent's pid, not by command line (copyable to hide). Test added. Tests: 225 passing.
-- Mistake: my live tests loaded the user's `.env`, so a few simulated alerts were posted to their Discord. Live tests now set `DISCORD_WEBHOOK_URL=""`.
+- Mistake: my live tests loaded the user's `.env`, so a few simulated alerts were posted to their Discord. Live tests now set `DISCORD_WEBHOOK_URL=""`. Worse: that test server (port 8766) survived `terminate()` and kept posting simulated alerts to Discord for hours, until the user noticed alerts with both terminals closed; Claude stopped it (pid 1392). Live tests now also check that no test server is left running.
 
 **Decisions**
 - Cloud storage is filtered by destination range only (no size or port limit): the user's tuning choice.
