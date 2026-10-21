@@ -61,10 +61,11 @@ Entry template:
 - SQLite is the single source of truth (no in-memory copy), to prepare for search/investigation queries. Events are not pruned for now.
 
 **Next** (in this order)
-1. Done: investigation `ecf6443`, Windows agent `52d9eea` (tried for real; SEN-001 from a real `whoami`). No Discord for MEDIUM alerts because `DISCORD_MIN_SEVERITY=HIGH` (by design).
-2. Phone layout committed by the user (`8b123e0`). User commits the remote agent work; then tries an agent on a second PC (agent/README.md section 5).
-3. **Detection exercise for the user:** password spraying with `value_count` (needs a new attack scenario).
-4. **Detection exercise:** SEN-003 misses failed logons without a source IP (local logons).
+- All of today's work is committed by the user: `7130983`, `499dd08`, `b948b52`, `ada7fcb`, `9f131c6`, `ecf6443`, `52d9eea`, `8b123e0`, `ddb520b` (remote agents), `988c724` (agent self-noise fix, standalone state file).
+1. **Security housekeeping on the main PC (user, admin):** set the network profile to Private; replace the broad `python.exe` Public inbound Allow rules with the narrow "Sentinela ingest" rule (Private, LocalSubnet, TCP 8000); rotate `SENTINELA_INGEST_KEY` (it appeared in a screenshot). When remote agents are not needed, go back to `SENTINELA_HOST=127.0.0.1`.
+2. Check the laptop runs the new `windows_agent.py` (no more `wevtutil qe Security` rows in the SOC).
+3. **Detection exercise for the user:** password spraying with `value_count` (needs a new attack scenario, T1110.003).
+4. **Detection exercise:** SEN-003 misses failed logons without a source IP (local logons): try grouping by host + user.
 5. Optional: HTTPS for agents; investigation extras ("Top" summary, filters in the URL).
 - Later: maybe prune old events (e.g. keep the last N days) if the database grows too big.
 
