@@ -21,7 +21,7 @@ Entry template:
 
 ---
 
-## 2026-10-21 — SEN-007 tuning, SEN-010 password search rule, SQLite storage, investigation
+## 2026-10-21 — SEN-007 tuning, SEN-010, SQLite storage, investigation, Windows agent
 
 **Done**
 - HISTORY.md: marked the SEN-009 work as committed (`9ceb21f`).
@@ -44,6 +44,10 @@ Entry template:
   - `GET /api/v1/events` new filters: `user` (ignores case), `ip` (source or destination), `event_type`, `since` / `until` (no timezone = UTC), `oldest_first`; all filters must match. SQL in `Store.list_events` via `json_extract`; timestamps compared as fixed-format UTC text (`_utc_text`).
   - SOC page: filter bar (host, event type, user, IP, text, Clear); hosts, users and IPs in the event table and alert details are **pivots** (click = show all events for that value, other filters cleared); **Timeline ±10 min** button on an alert (host + time window, oldest first, the alert's own events highlighted, removable chip).
   - Tests: 11 API filter tests. Tests: 197 passing. Verified in headless Chrome via DevTools Protocol (15 click checks: timeline, highlight, pivots, type filter, Clear, filters survive polling).
+- **Windows agent** (`agent/windows_agent.py`, stdlib only, same PC as Sentinela — the user's choice; no API key needed yet). Reads the Security log with `wevtutil qe` (XPath on EventID + `EventRecordID>N`), parses the XML, maps 4688 → process_creation (TargetUserName, else SubjectUserName; NewProcessName; CommandLine), 4624/4625 → authentication_success/failure (TargetUserName, IpAddress; only person logon types 2,3,7,8,10,11), 4720 → account_created (subject created target). Skips Windows' own accounts (SYSTEM, `PC$`, DWM-/UMFD-) unless `--include-system`. Bookmark in `data/agent-state.json`; first run starts from now (`--backfill N` for older); stops at the first failed send and retries, so nothing is lost. `--check` (auditpol by GUID + command-line registry value), `--dry-run`, `--once`. Clear 'Run as administrator' message.
+  - `agent/README.md`: audit setup commands (auditpol GUIDs, `ProcessCreationIncludeCmdLine_Enabled`), check, dry run, things to try, privacy note, how to switch auditing off.
+  - Tests: 17 in `tests/test_windows_agent.py` with sample Security XML (mapping, noise filter, bookmark, retry, dry run, real whoami → SEN-001). Tests: 214 passing. Not run against the real Security log: Claude's shell is not admin (verified: Access is denied, and the message is clear).
+  - Found: SEN-003 groups by `source_ip`, so failed logons without a source address (local logons) never count as brute force.
 - Mistake: my live tests loaded the user's `.env`, so a few simulated alerts were posted to their Discord. Live tests now set `DISCORD_WEBHOOK_URL=""`.
 
 **Decisions**
@@ -52,10 +56,10 @@ Entry template:
 - SQLite is the single source of truth (no in-memory copy), to prepare for search/investigation queries. Events are not pruned for now.
 
 **Next** (in this order)
-1. User commits the investigation work.
-2. Optional investigation extras: "Top" summary for a host/user (most-run programs, failed-logon IPs), keep the pivot filters in the URL so an investigation can be bookmarked.
+1. Done: investigation committed by the user as `ecf6443`.
+2. **User tries the agent for real** (Admin PowerShell): audit setup from `agent/README.md`, `--check`, `--dry-run`, then send; fix whatever the real Security log shows (field names, noise volume, `runas` source IP). Then commit.
 3. **Detection exercise for the user:** password spraying with `value_count` (needs a new attack scenario).
-4. Real Windows agent that sends Event Log data to `/api/v1/ingest`.
+4. Optional: investigation extras ("Top" summary, filters in the URL); agents on other machines (API key for `/ingest`); SEN-003 gap for failed logons without a source IP.
 - Known issue (older than this session): on phone width (~420 px) the whole page is wider than the screen (top bar chips and stat cards overflow).
 - Later: maybe prune old events (e.g. keep the last N days) if the database grows too big.
 

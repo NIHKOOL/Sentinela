@@ -145,6 +145,7 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 * Some normal activity triggers rules on purpose (an admin running `whoami`, IT creating an account, a developer searching code), so the SOC must learn to tell false positives apart.
 * Every rule has blind spots: lateral movement **from the IT workstation** (WS-IT01) is not detected, and an attacker uploading data to the allow-listed company cloud storage is missed. Finding and closing gaps like this is the job of detection engineering.
 * The web API only accepts changes from its own pages (requests from other websites get `403`, against CSRF) and only answers to `127.0.0.1` / `localhost` (against DNS rebinding). Agents and scripts that send no `Origin` header, like a real agent posting to `/api/v1/ingest`, are not affected.
+* **Real Windows events:** the [Windows agent](agent/README.md) reads this PC's Security log (4688 process creation, 4624 / 4625 logons, 4720 account created) and sends the events to `/api/v1/ingest`, where the same rules run on them. Run `whoami` on your own PC and SEN-001 fires.
 
 ### Detection rules · [MITRE ATT&CK documentation](https://attack.mitre.org/)
 
@@ -175,6 +176,7 @@ What I learned and practiced while building Sentinela, with where to find the ev
 |---|---|
 | **Alert triage: true vs. false positive** | Each alert is judged on context: who ran it, on which machine, with which command, and whether that is normal for this user. Example: `it-admin` running `systeminfo` on DC01 is routine admin work (FP), but `administrator` running `findstr /si password *.config` on the database server DB01 is an attacker hunting for credentials (TP). The score page checks every verdict against the ground truth. |
 | **Investigation: pivoting and timelines** | From one alert to the full story: click the attacker's IP to see every host it touched, click the user to see what else the account did, and open the ±10 minute timeline on the host to see what happened just before and after. The same questions can be asked in SQL on `data/sentinela.db` (`json_extract` on the event data). |
+| **Windows logging and audit policy** | The [Windows agent](agent/README.md) needs auditing switched on with `auditpol` (by category GUID, so it works on any Windows language) and command lines added to 4688 events. It maps Security log XML to one normalized schema, skips noise (services, machine accounts, non-person logon types), and keeps a bookmark (`EventRecordID`) so no event is sent twice or lost when the SIEM is down. |
 | **Reading endpoint telemetry** | Process creation events (in real environments: Windows Security **4688** / Sysmon **Event ID 1**), where the **command line** is the key evidence; logon success/failure (**4624 / 4625**); account creation (**4720**); outbound network connections with byte counts. |
 | **Following an attack through the kill chain** | Brute force → logon → discovery → file search → credential theft → backdoor account → lateral movement → exfiltration, each step mapped to [MITRE ATT&CK](https://attack.mitre.org/) (T1110, T1078, T1033/T1087, T1083, T1003, T1136, T1021, T1048). |
 | **Alert fatigue and grouping** | Measured over one simulated hour: SEN-008 matched **57 events** but produced only **2 alerts**, because repeats for the same host and user are grouped. SEN-007 produced **22 false positives per hour at HIGH severity**: a rule that needs tuning before analysts learn to ignore it. |
@@ -232,6 +234,7 @@ Sentinela/
 ├── rules/                     # Detection rules, one YAML file each (+ README.md guide)
 ├── web/                       # Pages: Overview, Organization, SOC, Attacker
 │   └── static/                # Shared CSS, JavaScript and logo (logo.png + resized copies)
+├── agent/                     # Windows agent: real Security log events -> /api/v1/ingest (+ README.md setup guide)
 ├── tests/                     # pytest suite
 ├── start.py / start.bat       # Start the server and open the browser
 ├── requirements.txt
@@ -254,7 +257,8 @@ Sentinela/
 - [x] A rule that catches password searches in files on Linux (SEN-010)
 - [x] Save events and alerts in SQLite so a game survives restarts
 - [x] Search and investigation: filters, pivots on host / user / IP, timeline around an alert
-- [ ] Real Windows agent that sends Event Log data to `/api/v1/ingest`
+- [x] Real Windows agent that sends Event Log data to `/api/v1/ingest` (same PC)
+- [ ] Agents on other machines (needs an API key for `/ingest`)
 
 ---
 
