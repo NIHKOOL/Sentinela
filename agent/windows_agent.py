@@ -18,6 +18,7 @@ Only the Python standard library is used, so this file also runs on its own.
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -52,6 +53,7 @@ CMDLINE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Policies\System\Audit"
 CMDLINE_VALUE = "ProcessCreationIncludeCmdLine_Enabled"
 
 DEFAULT_SERVER = "http://127.0.0.1:8000"
+KEY_ENV = "SENTINELA_INGEST_KEY"   # read from the environment, never from the command line (4688 would log it)
 DEFAULT_STATE = Path(__file__).resolve().parent.parent / "data" / "agent-state.json"
 BATCH = 200
 
@@ -60,6 +62,10 @@ BATCH = 200
 
 class EventLogError(Exception):
     pass
+
+
+class RejectedError(EventLogError):
+    """Sentinela refused the events (wrong key, wrong address): retrying will not help."""
 
 
 def wevtutil(*args: str) -> str:
@@ -168,11 +174,22 @@ def to_telemetry(raw: dict, include_system: bool = False) -> Optional[dict]:
 
 # --- Sending ---
 
-def send(server: str, event: dict) -> dict:
+def send(server: str, event: dict, key: Optional[str] = None) -> dict:
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["X-Sentinela-Key"] = key
     request = urllib.request.Request(f"{server}/api/v1/ingest", data=json.dumps(event).encode("utf-8"),
-                                     headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=10) as response:
-        return json.load(response)
+                                     headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as e:
+        hints = {401: f"Wrong or missing key: set {KEY_ENV} to the key in Sentinela's .env.",
+                 400: "Sentinela does not answer to this address. Use its IP address or name.",
+                 403: "Sentinela only accepts events from this PC. Set SENTINELA_HOST=0.0.0.0 on the Sentinela PC."}
+        if e.code in hints:
+            raise RejectedError(f"Sentinela refused the event (HTTP {e.code}). {hints[e.code]}")
+        raise
 
 
 # --- Remembering where we stopped ---
@@ -206,7 +223,7 @@ def handle(events: list[dict], args, sent_to: Optional[str]) -> Optional[int]:
                 print(json.dumps(event))
             else:
                 try:
-                    result = send(sent_to, event)
+                    result = send(sent_to, event, getattr(args, "key", None))
                 except (urllib.error.URLError, OSError) as e:
                     print(f"[-] Could not reach Sentinela at {sent_to} ({e}). Will retry.")
                     return handled
@@ -284,10 +301,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--backfill", type=int, default=0, metavar="N", help="also send the last N older events at start")
     parser.add_argument("--include-system", action="store_true", help="also send activity of Windows' own accounts (noisy)")
     parser.add_argument("--state", default=str(DEFAULT_STATE), help="file that remembers the last event sent")
+    # No --key option on purpose: process creation events (4688) record command lines, key included
     parser.add_argument("--dry-run", action="store_true", help="print the events instead of sending them")
     parser.add_argument("--once", action="store_true", help="check one time, then stop")
     parser.add_argument("--check", action="store_true", help="show whether auditing is switched on, then stop")
     args = parser.parse_args(argv)
+    args.key = os.getenv(KEY_ENV, "").strip() or None
 
     try:
         return check() if args.check else run(args)

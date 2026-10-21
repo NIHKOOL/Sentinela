@@ -1,6 +1,9 @@
 """FastAPI app: serves the web pages and the REST API."""
 import asyncio
+import hmac
+import ipaddress
 import os
+import socket
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -8,7 +11,7 @@ from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -32,12 +35,22 @@ PAGES = {
 # Host names the server answers to. Anything else (e.g. a DNS rebinding attack) gets 400.
 LOCAL_HOSTS = ["127.0.0.1", "localhost"]
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# What other machines may use when agents are allowed over the network: sending events, and a health check
+REMOTE_PATHS = {"/api/v1/ingest", "/health"}
+KEY_HEADER = "X-Sentinela-Key"
 
 router = APIRouter(prefix="/api/v1")
 
 
 def get_sim(request: Request) -> Simulation:
     return request.app.state.simulation
+
+
+def require_ingest_key(request: Request, key: Optional[str] = Header(None, alias=KEY_HEADER)):
+    """When an ingest key is set, every agent must send it (compared in constant time)."""
+    expected = request.app.state.ingest_key
+    if expected and not (key and hmac.compare_digest(key.encode(), expected.encode())):
+        raise HTTPException(status_code=401, detail=f"Missing or wrong {KEY_HEADER} header.")
 
 
 # --- Organization ---
@@ -124,7 +137,7 @@ def list_attacks(request: Request):
 
 # --- Events ---
 
-@router.post("/ingest")
+@router.post("/ingest", dependencies=[Depends(require_ingest_key)])
 def ingest_event(event: TelemetryEvent, request: Request):
     """Entry point for real agents. Events go through the same pipeline as simulated ones."""
     stored = get_sim(request).ingest(event, origin="external")
@@ -244,6 +257,23 @@ def _is_cross_site(request: Request) -> bool:
     return urlsplit(origin).netloc.lower() != request.headers.get("host", "").lower()
 
 
+def _is_loopback(host: Optional[str]) -> bool:
+    try:
+        return ipaddress.ip_address(host or "").is_loopback
+    except ValueError:
+        return False
+
+
+def _own_addresses() -> list[str]:
+    """This machine's name and IP addresses: what agents on other machines put in the Host header."""
+    name = socket.gethostname()
+    try:
+        ips = socket.gethostbyname_ex(name)[2]
+    except OSError:
+        ips = []
+    return [name, *ips]
+
+
 def _page(filename: str):
     def serve():
         return FileResponse(WEB_DIR / filename)
@@ -252,8 +282,15 @@ def _page(filename: str):
 
 def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict], None]] = None,
                seed: Optional[int] = None, rules_dir: Path = DEFAULT_RULES_DIR,
-               allowed_hosts: Optional[list[str]] = None) -> FastAPI:
-    """Build the app. Without `data_dir` the organization and the game are kept in memory only (used by tests)."""
+               allowed_hosts: Optional[list[str]] = None, ingest_key: Optional[str] = None,
+               remote_agents: bool = False) -> FastAPI:
+    """Build the app. Without `data_dir` the organization and the game are kept in memory only (used by tests).
+
+    `remote_agents`: agents on other machines may send events. Only /api/v1/ingest (with `ingest_key`)
+    is open to them; the pages and every other API stay reachable from this machine only.
+    """
+    if remote_agents and not ingest_key:
+        raise ValueError("Agents on other machines need an ingest key: set SENTINELA_INGEST_KEY in .env.")
     app = FastAPI(title="Sentinela SOC Simulator", version="0.3.0", lifespan=lifespan)
     organization = Organization(data_dir / "organization.json" if data_dir else None)
     app.state.rules_dir = Path(rules_dir)
@@ -261,13 +298,24 @@ def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict]
     store = Store(data_dir / "sentinela.db" if data_dir else None)
     app.state.simulation = Simulation(organization, notify or (lambda alert: None), seed, ruleset, store)
     app.state.webhook_configured = bool(getattr(notify, "configured", False))
+    app.state.ingest_key = ingest_key or None
 
     app.include_router(router)
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     for path, filename in PAGES.items():
         app.add_api_route(path, _page(filename), methods=["GET"], include_in_schema=False)
 
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or LOCAL_HOSTS)
+    hosts = list(allowed_hosts or LOCAL_HOSTS)
+    if remote_agents:
+        hosts += _own_addresses()  # agents reach this server by its name or network address
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+
+    @app.middleware("http")
+    async def only_ingest_from_other_machines(request: Request, call_next):
+        # Other machines may send events, but not open the SOC console, reset the game or launch attacks
+        if remote_agents and request.url.path not in REMOTE_PATHS and not _is_loopback(request.client and request.client.host):
+            return JSONResponse({"detail": "Only /api/v1/ingest is available from other machines."}, status_code=403)
+        return await call_next(request)
 
     @app.middleware("http")
     async def block_cross_site_changes(request: Request, call_next):
@@ -297,9 +345,12 @@ def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict]
 
 
 load_dotenv()
+LISTEN_HOST = os.getenv("SENTINELA_HOST", "127.0.0.1")
 app = create_app(
     data_dir=Path(os.getenv("SENTINELA_DATA_DIR", "data")),
     rules_dir=Path(os.getenv("SENTINELA_RULES_DIR", DEFAULT_RULES_DIR)),
     allowed_hosts=[h.strip() for h in os.getenv("SENTINELA_ALLOWED_HOSTS", "").split(",") if h.strip()] or None,
     notify=DiscordNotifier(os.getenv("DISCORD_WEBHOOK_URL", ""), os.getenv("DISCORD_MIN_SEVERITY", "HIGH")),
+    ingest_key=os.getenv("SENTINELA_INGEST_KEY", "").strip() or None,
+    remote_agents=not _is_loopback(LISTEN_HOST) and LISTEN_HOST != "localhost",
 )

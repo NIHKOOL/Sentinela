@@ -21,7 +21,7 @@ Entry template:
 
 ---
 
-## 2026-10-21 — SEN-007 tuning, SEN-010, SQLite storage, investigation, Windows agent
+## 2026-10-21 — SEN-007 tuning, SEN-010, SQLite storage, investigation, Windows agent (also remote)
 
 **Done**
 - HISTORY.md: marked the SEN-009 work as committed (`9ceb21f`).
@@ -49,6 +49,7 @@ Entry template:
   - Tests: 17 in `tests/test_windows_agent.py` with sample Security XML (mapping, noise filter, bookmark, retry, dry run, real whoami → SEN-001). Tests: 214 passing. Not run against the real Security log: Claude's shell is not admin (verified: Access is denied, and the message is clear).
   - Found: SEN-003 groups by `source_ip`, so failed logons without a source address (local logons) never count as brute force.
 - **Phone layout:** measured with real phone emulation (DevTools `Emulation.setDeviceMetricsOverride`, 390 px): no page was wider than the screen. The earlier "overflow" was my mistake: headless Chrome's `--window-size=420` does not make a 420 px viewport. Usability fixes in `style.css` (≤640 px): compact sticky top bar (brand + status chips on one row, menu on a second row that can scroll sideways; ~120 → ~70 px), 3-column smaller stat tiles. SOC page: selecting an alert in one-column layout scrolls to the details (after the lists refresh, so the position is right). Checked at 390 and 1400 px on all four pages; desktop click tests still pass.
+- **Agents on other machines** (the user's request): `SENTINELA_HOST=0.0.0.0` (read by `start.py` and `api.py`) turns on `remote_agents`, which requires `SENTINELA_INGEST_KEY` (app and `start.py` refuse to start without it). `/api/v1/ingest` checks the `X-Sentinela-Key` header with `hmac.compare_digest` whenever a key is set (also for the local agent). In remote mode, non-loopback clients may only use `/api/v1/ingest` and `/health` (403 otherwise), and the TrustedHost list adds this PC's name and IPs. Agent: key only from the `SENTINELA_INGEST_KEY` environment variable (no `--key`: 4688 would log the command line), clear messages for 401/403/400, and it stops instead of retrying on those. `.env.example`, `agent/README.md` section 5 (key, `.env`, `ipconfig`, firewall rule for the private subnet, troubleshooting table, plain-HTTP warning), README updated. Tests: 10 new (key, remote-only-ingest, local console kept, own address allowed, no key = no start, agent key from env). Tests: 224 passing. Not run on a real network: binding 0.0.0.0 would pop up a Windows Firewall prompt on the user's screen.
 - Mistake: my live tests loaded the user's `.env`, so a few simulated alerts were posted to their Discord. Live tests now set `DISCORD_WEBHOOK_URL=""`.
 
 **Decisions**
@@ -57,10 +58,11 @@ Entry template:
 - SQLite is the single source of truth (no in-memory copy), to prepare for search/investigation queries. Events are not pruned for now.
 
 **Next** (in this order)
-1. Done: investigation committed by the user as `ecf6443`.
-2. Done: the user ran the agent for real; a real `whoami` showed up as SEN-001 in the SOC. Committed as `52d9eea`. No Discord message because SEN-001 is MEDIUM and `.env` has `DISCORD_MIN_SEVERITY=HIGH` (by design).
+1. Done: investigation `ecf6443`, Windows agent `52d9eea` (tried for real; SEN-001 from a real `whoami`). No Discord for MEDIUM alerts because `DISCORD_MIN_SEVERITY=HIGH` (by design).
+2. Phone layout committed by the user (`8b123e0`). User commits the remote agent work; then tries an agent on a second PC (agent/README.md section 5).
 3. **Detection exercise for the user:** password spraying with `value_count` (needs a new attack scenario).
-4. Optional: investigation extras ("Top" summary, filters in the URL); agents on other machines (API key for `/ingest`); SEN-003 gap for failed logons without a source IP.
+4. **Detection exercise:** SEN-003 misses failed logons without a source IP (local logons).
+5. Optional: HTTPS for agents; investigation extras ("Top" summary, filters in the URL).
 - Later: maybe prune old events (e.g. keep the last N days) if the database grows too big.
 
 ---

@@ -145,7 +145,7 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 * Some normal activity triggers rules on purpose (an admin running `whoami`, IT creating an account, a developer searching code), so the SOC must learn to tell false positives apart.
 * Every rule has blind spots: lateral movement **from the IT workstation** (WS-IT01) is not detected, and an attacker uploading data to the allow-listed company cloud storage is missed. Finding and closing gaps like this is the job of detection engineering.
 * The web API only accepts changes from its own pages (requests from other websites get `403`, against CSRF) and only answers to `127.0.0.1` / `localhost` (against DNS rebinding). Agents and scripts that send no `Origin` header, like a real agent posting to `/api/v1/ingest`, are not affected.
-* **Real Windows events:** the [Windows agent](agent/README.md) reads this PC's Security log (4688 process creation, 4624 / 4625 logons, 4720 account created) and sends the events to `/api/v1/ingest`, where the same rules run on them. Run `whoami` on your own PC and SEN-001 fires.
+* **Real Windows events:** the [Windows agent](agent/README.md) reads this PC's Security log (4688 process creation, 4624 / 4625 logons, 4720 account created) and sends the events to `/api/v1/ingest`, where the same rules run on them. Run `whoami` on your own PC and SEN-001 fires. With `SENTINELA_HOST=0.0.0.0` and a `SENTINELA_INGEST_KEY`, agents on other PCs in your network can send events too; they can reach only `/api/v1/ingest` (with the key), never the console.
 
 ### Detection rules · [MITRE ATT&CK documentation](https://attack.mitre.org/)
 
@@ -257,8 +257,9 @@ Sentinela/
 - [x] A rule that catches password searches in files on Linux (SEN-010)
 - [x] Save events and alerts in SQLite so a game survives restarts
 - [x] Search and investigation: filters, pivots on host / user / IP, timeline around an alert
-- [x] Real Windows agent that sends Event Log data to `/api/v1/ingest` (same PC)
-- [ ] Agents on other machines (needs an API key for `/ingest`)
+- [x] Real Windows agent that sends Event Log data to `/api/v1/ingest`
+- [x] Agents on other machines: ingest key, console kept on the Sentinela PC
+- [ ] HTTPS between agents and Sentinela
 
 ---
 

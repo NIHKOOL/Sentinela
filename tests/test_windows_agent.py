@@ -99,14 +99,15 @@ def test_handle_sends_and_stops_at_the_first_failure(monkeypatch, capsys):
     raws = agent.parse_events(wrap(WHOAMI, SERVICE_LOGON, LOGON, FAILED))
     sent = []
 
-    def fake_send(server, event):
+    def fake_send(server, event, key):
+        assert key == "s3cret"
         if event["event_type"] == "authentication_failure":
             raise agent.urllib.error.URLError("connection refused")
         sent.append(event["event_type"])
         return {"alert_triggered": False, "alert_ids": []}
 
     monkeypatch.setattr(agent, "send", fake_send)
-    args = agent.argparse.Namespace(include_system=False)
+    args = agent.argparse.Namespace(include_system=False, key="s3cret")
     last = agent.handle(raws, args, "http://127.0.0.1:8000")
     assert sent == ["process_creation", "authentication_success"]   # the service logon was skipped, not sent
     assert last == 102            # the failed send (103) is retried next time
@@ -117,3 +118,22 @@ def test_dry_run_prints_json(capsys):
     args = agent.argparse.Namespace(include_system=False)
     assert agent.handle(agent.parse_events(wrap(WHOAMI)), args, None) == 101
     assert json.loads(capsys.readouterr().out)["command_line"] == "whoami /all"
+
+
+def test_rejected_event_stops_the_agent(monkeypatch):
+    # A wrong key will not fix itself: stop with a clear message instead of retrying forever
+    def refuse(server, event, key):
+        raise agent.RejectedError("Sentinela refused the event (HTTP 401).")
+
+    monkeypatch.setattr(agent, "send", refuse)
+    args = agent.argparse.Namespace(include_system=False, key="wrong")
+    with pytest.raises(agent.RejectedError):
+        agent.handle(agent.parse_events(wrap(WHOAMI)), args, "http://192.168.1.10:8000")
+
+
+def test_key_comes_from_the_environment_not_the_command_line(monkeypatch):
+    monkeypatch.setenv(agent.KEY_ENV, "s3cret")
+    monkeypatch.setattr(agent, "run", lambda args: args.key)
+    assert agent.main(["--once"]) == "s3cret"
+    with pytest.raises(SystemExit):
+        agent.main(["--key", "s3cret"])   # no such option

@@ -265,3 +265,55 @@ def test_event_filters(investigation, params, expected):
 @pytest.mark.parametrize("params", [{"event_type": "bogus"}, {"since": "yesterday"}, {"user": "x" * 101}])
 def test_bad_event_filters_are_rejected(client, params):
     assert client.get("/api/v1/events", params=params).status_code == 422
+
+
+# --- Agents on other machines: ingest key and remote access ---
+
+AGENT_EVENT = {"hostname": "WS-REMOTE", "event_type": "process_creation", "user": "eve",
+               "process_name": "C:\Windows\System32\whoami.exe", "command_line": "whoami"}
+
+
+def remote_app(tmp_path):
+    return create_app(data_dir=tmp_path, ingest_key="s3cret", remote_agents=True)
+
+
+@pytest.mark.parametrize("headers,status", [({}, 401), ({"X-Sentinela-Key": "wrong"}, 401),
+                                            ({"X-Sentinela-Key": "s3cret"}, 200)])
+def test_ingest_key_is_required_when_set(tmp_path, headers, status):
+    client = make_client(data_dir=tmp_path, ingest_key="s3cret")
+    assert client.post("/api/v1/ingest", json=AGENT_EVENT, headers=headers).status_code == status
+
+
+def test_ingest_is_open_without_a_key(client):
+    assert client.post("/api/v1/ingest", json=AGENT_EVENT).status_code == 200
+
+
+def test_other_machines_may_only_send_events(tmp_path):
+    other = TestClient(remote_app(tmp_path), base_url=BASE_URL, client=("192.168.1.50", 50000))
+    key = {"X-Sentinela-Key": "s3cret"}
+    assert other.post("/api/v1/ingest", json=AGENT_EVENT, headers=key).status_code == 200
+    assert other.post("/api/v1/ingest", json=AGENT_EVENT).status_code == 401
+    assert other.get("/health").status_code == 200
+    for path in ["/soc", "/api/v1/events", "/api/v1/alerts", "/static/common.js"]:
+        assert other.get(path).status_code == 403
+    assert other.post("/api/v1/simulation/reset").status_code == 403
+
+
+def test_this_machine_keeps_the_full_console_in_network_mode(tmp_path):
+    local = TestClient(remote_app(tmp_path), base_url=BASE_URL, client=("127.0.0.1", 50000))
+    local.post("/api/v1/ingest", json=AGENT_EVENT, headers={"X-Sentinela-Key": "s3cret"})
+    assert local.get("/soc").status_code == 200
+    assert [e["hostname"] for e in local.get("/api/v1/events").json()] == ["WS-REMOTE"]
+
+
+def test_agents_can_use_this_machines_address(tmp_path, monkeypatch):
+    import sentinela.api as api
+    monkeypatch.setattr(api, "_own_addresses", lambda: ["SOC-PC", "192.168.1.10"])
+    agent_client = TestClient(remote_app(tmp_path), base_url="http://192.168.1.10:8000", client=("192.168.1.50", 50000))
+    assert agent_client.get("/health").status_code == 200
+    assert agent_client.get("/health", headers={"Host": "evil.example"}).status_code == 400
+
+
+def test_network_mode_without_a_key_refuses_to_start(tmp_path):
+    with pytest.raises(ValueError, match="SENTINELA_INGEST_KEY"):
+        create_app(data_dir=tmp_path, remote_agents=True)
