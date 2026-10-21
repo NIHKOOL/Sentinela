@@ -180,7 +180,15 @@ tr.selected td { background: var(--row-selected); }
 }
 @media (max-width: 640px) {
   .page { padding: 16px 16px 40px; }
-  .topbar { padding: 8px 16px; gap: 8px; }
-  .nav a { padding: 8px 10px; }
+  /* Compact sticky bar: brand and status chips on one row, the menu on a second row */
+  .topbar { padding: 6px 16px 0; gap: 4px 6px; }
+  .brand { margin-right: auto; }
+  .brand small { display: none; }
+  .chip { padding: 2px 8px; font-size: 12px; }
+  .nav { order: 3; width: 100%; margin-right: 0; flex-wrap: nowrap; overflow-x: auto; }
+  .nav a { padding: 6px 10px 8px; white-space: nowrap; }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; }
+  .stat { padding: 10px 12px; }
+  .stat .value { font-size: 22px; }
   .field-row { grid-template-columns: minmax(0, 1fr); }
 }

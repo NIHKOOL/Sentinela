@@ -48,6 +48,7 @@ Entry template:
   - `agent/README.md`: audit setup commands (auditpol GUIDs, `ProcessCreationIncludeCmdLine_Enabled`), check, dry run, things to try, privacy note, how to switch auditing off.
   - Tests: 17 in `tests/test_windows_agent.py` with sample Security XML (mapping, noise filter, bookmark, retry, dry run, real whoami → SEN-001). Tests: 214 passing. Not run against the real Security log: Claude's shell is not admin (verified: Access is denied, and the message is clear).
   - Found: SEN-003 groups by `source_ip`, so failed logons without a source address (local logons) never count as brute force.
+- **Phone layout:** measured with real phone emulation (DevTools `Emulation.setDeviceMetricsOverride`, 390 px): no page was wider than the screen. The earlier "overflow" was my mistake: headless Chrome's `--window-size=420` does not make a 420 px viewport. Usability fixes in `style.css` (≤640 px): compact sticky top bar (brand + status chips on one row, menu on a second row that can scroll sideways; ~120 → ~70 px), 3-column smaller stat tiles. SOC page: selecting an alert in one-column layout scrolls to the details (after the lists refresh, so the position is right). Checked at 390 and 1400 px on all four pages; desktop click tests still pass.
 - Mistake: my live tests loaded the user's `.env`, so a few simulated alerts were posted to their Discord. Live tests now set `DISCORD_WEBHOOK_URL=""`.
 
 **Decisions**
@@ -57,10 +58,9 @@ Entry template:
 
 **Next** (in this order)
 1. Done: investigation committed by the user as `ecf6443`.
-2. **User tries the agent for real** (Admin PowerShell): audit setup from `agent/README.md`, `--check`, `--dry-run`, then send; fix whatever the real Security log shows (field names, noise volume, `runas` source IP). Then commit.
+2. Done: the user ran the agent for real; a real `whoami` showed up as SEN-001 in the SOC. Committed as `52d9eea`. No Discord message because SEN-001 is MEDIUM and `.env` has `DISCORD_MIN_SEVERITY=HIGH` (by design).
 3. **Detection exercise for the user:** password spraying with `value_count` (needs a new attack scenario).
 4. Optional: investigation extras ("Top" summary, filters in the URL); agents on other machines (API key for `/ingest`); SEN-003 gap for failed logons without a source IP.
-- Known issue (older than this session): on phone width (~420 px) the whole page is wider than the screen (top bar chips and stat cards overflow).
 - Later: maybe prune old events (e.g. keep the last N days) if the database grows too big.
 
 ---

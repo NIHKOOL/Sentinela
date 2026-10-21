@@ -11,6 +11,7 @@
 <style>
   .detail { position: sticky; top: 72px; }
   @media (max-width: 1000px) { .detail { position: static; } }
+  .detail, #events-panel { scroll-margin-top: 110px; }   /* below the sticky top bar, also on phones */
   .detail dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 10px; margin: 0; }
   .detail dt { color: var(--muted); font-size: 12.5px; }
   .detail dd { margin: 0; overflow-wrap: anywhere; }
@@ -20,7 +21,6 @@
   .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .filters input { width: 150px; }
   .filters input.short { width: 110px; }
-  #events-panel { scroll-margin-top: 72px; }
   .pivot { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer;
            text-decoration: underline dotted; text-underline-offset: 3px; overflow-wrap: anywhere; text-align: left; }
   .pivot:hover { text-decoration-style: solid; }
@@ -264,7 +264,12 @@ async function loadAssets() {
 async function select(alertId) {
   selectedId = alertId;
   await renderDetail();
-  refresh();
+  await refresh();
+  // One column (phones, small windows): the details are below the lists, so bring them into view.
+  // After refresh(), so the lists above no longer change height.
+  if (matchMedia("(max-width: 1000px)").matches) {
+    document.getElementById("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function assetInfo(hostname) {
