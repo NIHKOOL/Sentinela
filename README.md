@@ -108,6 +108,7 @@ All tests should pass.
 | The page looks outdated after an update | Press **Ctrl+F5** to reload it without the browser cache. |
 | `Invalid host header` | Open Sentinela as http://127.0.0.1:8000 or http://localhost:8000. To use another name, set `SENTINELA_ALLOWED_HOSTS` (comma-separated) in `.env`. |
 | The top bar says **Discord off** | Check `.env` (step 4), then restart Sentinela. `.env` is only read at startup. |
+| I want a completely fresh game | Click **Reset** in the app, or stop Sentinela and delete `data/sentinela.db` (and the `-wal` / `-shm` files next to it). |
 
 ---
 
@@ -139,6 +140,7 @@ The interactive API docs are at http://127.0.0.1:8000/docs. Run the tests with `
 * **Detection rules are YAML files** in the [`rules/`](rules/) folder, written in a [Sigma](https://sigmahq.io)-style format. Add or edit a rule, click **Reload rules** on the Overview page, and it is active, with no code changes and no restart.
 * **Correlation rules** remember earlier events: 5 failed logons from one source within 60 seconds is a brute force (SEN-003), and a successful logon from that source afterwards is critical (SEN-004).
 * Repeated matches of the same rule for the same host, user and source are **grouped** into one alert, like a real SIEM.
+* Events, alerts, triage notes and attacks are **saved in SQLite** (`data/sentinela.db`), so a game survives a restart. Only correlation memory (e.g. failed logons in the last 60 seconds) starts empty again.
 * The simulation remembers which events came from the attacker (**ground truth**), but the SOC views never show it. The score compares your verdicts with the truth.
 * Some normal activity triggers rules on purpose (an admin running `whoami`, IT creating an account, a developer searching code), so the SOC must learn to tell false positives apart.
 * Every rule has blind spots: lateral movement **from the IT workstation** (WS-IT01) is not detected, and an attacker uploading data to the allow-listed company cloud storage is missed. Finding and closing gaps like this is the job of detection engineering.
@@ -224,6 +226,7 @@ Sentinela/
 │   ├── rules.py               # Loads and validates the YAML rules (Sigma-style engine)
 │   ├── detection.py           # Runs the rules on events, keeps correlation state
 │   ├── simulation.py          # Event pipeline, alert grouping, triage, scoring
+│   ├── storage.py             # SQLite storage for events, alerts and attacks (data/sentinela.db)
 │   └── alerting.py            # Discord notifications
 ├── rules/                     # Detection rules, one YAML file each (+ README.md guide)
 ├── web/                       # Pages: Overview, Organization, SOC, Attacker
@@ -248,7 +251,8 @@ Sentinela/
 - [x] Tune the noisiest rule (SEN-007: allowlist known cloud storage)
 - [x] A rule that catches lateral movement (SEN-009)
 - [x] A rule that catches password searches in files on Linux (SEN-010)
-- [ ] Save events and alerts in SQLite so a game survives restarts
+- [x] Save events and alerts in SQLite so a game survives restarts
+- [ ] Search and investigation: a timeline per host or user
 - [ ] Real Windows agent that sends Event Log data to `/api/v1/ingest`
 
 ---

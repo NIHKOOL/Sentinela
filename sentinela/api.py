@@ -18,6 +18,7 @@ from .models import AlertUpdate, AssetIn, AttackRequest, SimulationSettings, Tel
 from .organization import Organization
 from .rules import DEFAULT_RULES_DIR, RuleSet, load_rules
 from .simulation import Simulation
+from .storage import Store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 PAGES = {
@@ -213,6 +214,7 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(_background_loop(app.state.simulation))
     yield
     task.cancel()
+    app.state.simulation.store.close()
 
 
 def _load_and_report(rules_dir: Path) -> RuleSet:
@@ -242,12 +244,13 @@ def _page(filename: str):
 def create_app(data_dir: Optional[Path] = None, notify: Optional[Callable[[dict], None]] = None,
                seed: Optional[int] = None, rules_dir: Path = DEFAULT_RULES_DIR,
                allowed_hosts: Optional[list[str]] = None) -> FastAPI:
-    """Build the app. Without `data_dir` the organization is kept in memory only (used by tests)."""
+    """Build the app. Without `data_dir` the organization and the game are kept in memory only (used by tests)."""
     app = FastAPI(title="Sentinela SOC Simulator", version="0.3.0", lifespan=lifespan)
     organization = Organization(data_dir / "organization.json" if data_dir else None)
     app.state.rules_dir = Path(rules_dir)
     ruleset = _load_and_report(app.state.rules_dir)
-    app.state.simulation = Simulation(organization, notify or (lambda alert: None), seed, ruleset)
+    store = Store(data_dir / "sentinela.db" if data_dir else None)
+    app.state.simulation = Simulation(organization, notify or (lambda alert: None), seed, ruleset, store)
     app.state.webhook_configured = bool(getattr(notify, "configured", False))
 
     app.include_router(router)

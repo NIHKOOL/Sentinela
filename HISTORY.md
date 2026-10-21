@@ -21,7 +21,7 @@ Entry template:
 
 ---
 
-## 2026-10-21 — SEN-007 tuning, SEN-010 password search rule
+## 2026-10-21 — SEN-007 tuning, SEN-010 password search rule, SQLite storage
 
 **Done**
 - HISTORY.md: marked the SEN-009 work as committed (`9ceb21f`).
@@ -32,17 +32,24 @@ Entry template:
 - Committed by the user: `7130983` (HISTORY), `499dd08` (SEN-007 tuning).
 - **SEN-010 Password search in files** (`rules/sen-010-credentials-in-files.yml`, T1552.001, medium): Claude wrote the skeleton, the user filled it in. `search_programs` (grep, egrep, fgrep, zgrep, rg) and `secret_words` (`password`, `secret`). Review fixed: `egrap` typo, `ri` (a grep option, not a program), and `passwd` removed (matched `grep alice /etc/passwd`, an account lookup; the file holds no passwords).
 - Tests: shipped-rule ID lists use `f"SEN-{n:03d}"` (the old `SEN-00{n}` gives `SEN-0010`); SEN-010 must-catch/must-ignore cases; Linux File search is now detected by SEN-008 + SEN-010. Tests: 181 passing.
-- README (rule table, blind spots, false-positive list, skills, roadmap) and `rules/README.md` (SEN-007 / SEN-010 ideas marked solved) updated.
+- README (rule table, blind spots, false-positive list, skills, roadmap) and `rules/README.md` (SEN-007 / SEN-010 ideas marked solved) updated. Committed by the user: `b948b52`.
+- SEN-007 polish by the user: obsolete cloud-storage false positive removed, blind-spot comment (T1567.002) added.
+- **SQLite storage** (`sentinela/storage.py`, stdlib `sqlite3`, file `data/sentinela.db`, WAL mode; in memory when no data dir, as in tests). Tables: `attacks`, `events` (event JSON in `data`; `origin` and `attack_id` in their own columns), `alerts` (with `group_key` for grouping), `alert_events` (many-to-many). `Simulation` now reads and writes through the `Store`; one transaction per ingest; Discord/print happen after the commit. `create_app` builds the store, `lifespan` closes it.
+- Fixed a ground-truth leak found on the way: the event search also searched the hidden `origin` field, so searching "attack" listed only attacker events. `origin` is now outside the searchable data.
+- Removed the 5000-event memory cap (the database keeps every event until **Reset**). Correlation memory is not saved: it starts empty after a restart.
+- New `tests/test_storage.py` (5 tests: game survives a restart, ids continue, grouping joins a saved alert, reset clears the file, search hides ground truth). Tests: 186 passing. Verified live on port 8766: attack + restart → events, alert and attack still there.
+- README (feature note, troubleshooting "fresh game", project structure, roadmap) and `.gitignore` comment updated.
 
 **Decisions**
 - Cloud storage is filtered by destination range only (no size or port limit): the user's tuning choice.
 - SEN-010 is credential access (T1552.001), not discovery: it reads file contents for secrets.
+- SQLite is the single source of truth (no in-memory copy), to prepare for search/investigation queries. Events are not pruned for now.
 
 **Next** (in this order)
-1. User commits SEN-010 (rule, tests, docs).
-2. Small polish in `sen-007-large-upload.yml`: remove the now-filtered first `falsepositives` entry, add a blind-spot comment above `filter_cloud_storage`.
-3. **Detection exercise for the user:** password spraying with `value_count`.
-4. **SQLite storage** for events, alerts, attacks and triage, so games survive restarts. Then search/investigation (timeline per host/user), then a real Windows agent.
+1. User commits the SQLite storage work and the SEN-007 polish.
+2. **Search/investigation:** a timeline per host or user (SQL queries on `events`), then a real Windows agent.
+3. **Detection exercise for the user:** password spraying with `value_count` (needs a new attack scenario).
+- Later: maybe prune old events (e.g. keep the last N days) if the database grows too big.
 
 ---
 
